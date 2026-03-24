@@ -21,6 +21,8 @@ export default function DashboardPage() {
   const [screenshotsLoading, setScreenshotsLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [tagFilter, setTagFilter] = useState("");
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [modalEntered, setModalEntered] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +82,35 @@ export default function DashboardPage() {
     });
   }, [router]);
 
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedImage(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedImage) {
+      setModalEntered(false);
+      return;
+    }
+    setModalEntered(false);
+    let cancelled = false;
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) setModalEntered(true);
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+    };
+  }, [selectedImage]);
+
   async function handleLogout() {
     setSigningOut(true);
     setError(null);
@@ -114,95 +145,118 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 font-sans">
-      <div className="mx-auto max-w-5xl space-y-6 p-6">
-        <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <h1 className="mb-3 text-2xl font-semibold text-gray-900">
-            You are logged in
-          </h1>
-          <div className="mb-6 rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-900">
-            Signed in as:{" "}
-            <span className="font-medium text-gray-900">{email ?? "unknown"}</span>
+    <>
+      <main className="min-h-screen bg-gray-50 font-sans">
+        <div className="mx-auto max-w-5xl space-y-6 p-6">
+          <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <h1 className="mb-3 text-2xl font-semibold text-gray-900">
+              You are logged in
+            </h1>
+            <div className="mb-6 rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-900">
+              Signed in as:{" "}
+              <span className="font-medium text-gray-900">{email ?? "unknown"}</span>
+            </div>
+
+            {error && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handleLogout}
+              disabled={signingOut}
+              className="h-11 w-full rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+            >
+              {signingOut ? "Signing out..." : "Log out"}
+            </button>
           </div>
 
-          {error && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+          <section className="space-y-3">
+            <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
+            <ScreenshotUploader onUploadComplete={fetchScreenshots} />
+          </section>
 
-          <button
-            onClick={handleLogout}
-            disabled={signingOut}
-            className="h-11 w-full rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
-          >
-            {signingOut ? "Signing out..." : "Log out"}
-          </button>
-        </div>
-
-        <section className="space-y-3">
-          <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
-          <ScreenshotUploader onUploadComplete={fetchScreenshots} />
-        </section>
-
-        <section className="space-y-3">
-          {screenshotsLoading ? (
-            <p className="text-sm text-gray-600">Loading screenshots...</p>
-          ) : screenshots.length === 0 ? (
-            <p className="text-sm text-gray-600">No screenshots yet</p>
-          ) : (
-            <>
-              <input
-                type="text"
-                value={tagFilter}
-                onChange={(e) => setTagFilter(e.target.value)}
-                placeholder="Filter by tag..."
-                className="mb-4 w-full max-w-sm border rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
-              />
-              {filteredScreenshots.length === 0 ? (
-                <p className="text-sm text-gray-600">No screenshots match this tag</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                  {filteredScreenshots.map((shot) => (
-                    <div key={shot.id} className="flex flex-col">
-                      <div className="group relative h-48 cursor-pointer overflow-hidden rounded-xl shadow-sm transition hover:shadow-md">
-                        <Image
-                          src={shot.image_url}
-                          alt="Uploaded screenshot"
-                          fill
-                          onLoad={() => handleImageLoaded(shot.id)}
-                          className={`object-cover transition duration-300 ${
-                            loadedImages[shot.id] ? "opacity-100" : "opacity-0"
-                          } group-hover:scale-[1.02]`}
-                        />
-                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-black/10 to-transparent opacity-0 transition duration-200 group-hover:opacity-100" />
-                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition duration-200 group-hover:opacity-100">
-                          <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-gray-900 shadow-sm">
-                            View
-                          </span>
-                        </div>
-                      </div>
-                      {shot.tags && shot.tags.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {shot.tags?.map((tag, i) => (
-                            <span
-                              key={`${shot.id}-${tag}-${i}`}
-                              className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
-                            >
-                              {tag}
+          <section className="space-y-3">
+            {screenshotsLoading ? (
+              <p className="text-sm text-gray-600">Loading screenshots...</p>
+            ) : screenshots.length === 0 ? (
+              <p className="text-sm text-gray-600">No screenshots yet</p>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={tagFilter}
+                  onChange={(e) => setTagFilter(e.target.value)}
+                  placeholder="Filter by tag..."
+                  className="mb-4 w-full max-w-sm border rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+                />
+                {filteredScreenshots.length === 0 ? (
+                  <p className="text-sm text-gray-600">No screenshots match this tag</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                    {filteredScreenshots.map((shot) => (
+                      <div key={shot.id} className="flex flex-col">
+                        <div
+                          onClick={() => setSelectedImage(shot.image_url)}
+                          className="group relative h-48 cursor-pointer overflow-hidden rounded-xl shadow-sm transition hover:shadow-md"
+                        >
+                          <Image
+                            src={shot.image_url}
+                            alt="Uploaded screenshot"
+                            fill
+                            onLoad={() => handleImageLoaded(shot.id)}
+                            className={`object-cover transition duration-300 ${
+                              loadedImages[shot.id] ? "opacity-100" : "opacity-0"
+                            } group-hover:scale-[1.02]`}
+                          />
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-black/10 to-transparent opacity-0 transition duration-200 group-hover:opacity-100" />
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition duration-200 group-hover:opacity-100">
+                            <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-gray-900 shadow-sm">
+                              View
                             </span>
-                          ))}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </section>
-      </div>
-    </main>
+                        {shot.tags && shot.tags.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {shot.tags?.map((tag, i) => (
+                              <span
+                                key={`${shot.id}-${tag}-${i}`}
+                                className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      </main>
+
+      {selectedImage && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 transition-opacity duration-200 ease-out ${
+            modalEntered ? "opacity-100" : "opacity-0"
+          }`}
+          onClick={() => setSelectedImage(null)}
+        >
+          <img
+            src={selectedImage}
+            alt="Selected screenshot"
+            onClick={(e) => e.stopPropagation()}
+            className={`max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg transition-[opacity,transform] duration-200 ease-out ${
+              modalEntered ? "scale-100 opacity-100" : "scale-[0.98] opacity-0"
+            }`}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
