@@ -21,7 +21,7 @@ export default function DashboardPage() {
   const [screenshotsLoading, setScreenshotsLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [tagFilter, setTagFilter] = useState("");
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -83,18 +83,43 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setSelectedImage(null);
+        setSelectedIndex(null);
+        return;
+      }
+
+      const filteredScreenshots = screenshots.filter((s) => {
+        if (!tagFilter) return true;
+
+        return s.tags?.some((tag) =>
+          tag.toLowerCase().includes(tagFilter.toLowerCase())
+        );
+      });
+
+      if (selectedIndex === null) return;
+      if (selectedIndex < 0 || selectedIndex >= filteredScreenshots.length) return;
+
+      if (e.key === "ArrowRight") {
+        setSelectedIndex((prev) =>
+          prev !== null && prev < filteredScreenshots.length - 1
+            ? prev + 1
+            : prev
+        );
+      }
+      if (e.key === "ArrowLeft") {
+        setSelectedIndex((prev) =>
+          prev !== null && prev > 0 ? prev - 1 : prev
+        );
       }
     };
 
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, []);
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [screenshots, tagFilter, selectedIndex]);
 
   useEffect(() => {
-    if (!selectedImage) {
+    if (selectedIndex === null) {
       setModalEntered(false);
       return;
     }
@@ -109,7 +134,7 @@ export default function DashboardPage() {
       cancelled = true;
       cancelAnimationFrame(id);
     };
-  }, [selectedImage]);
+  }, [selectedIndex]);
 
   async function handleLogout() {
     setSigningOut(true);
@@ -126,14 +151,6 @@ export default function DashboardPage() {
     }
   }
 
-  const filteredScreenshots = screenshots.filter((s) => {
-    if (!tagFilter) return true;
-
-    return s.tags?.some((tag) =>
-      tag.toLowerCase().includes(tagFilter.toLowerCase())
-    );
-  });
-
   if (checkingSession) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6 font-sans">
@@ -143,6 +160,17 @@ export default function DashboardPage() {
       </main>
     );
   }
+
+  const filteredScreenshots = screenshots.filter((s) => {
+    if (!tagFilter) return true;
+
+    return s.tags?.some((tag) =>
+      tag.toLowerCase().includes(tagFilter.toLowerCase())
+    );
+  });
+
+  const selectedImage =
+    selectedIndex !== null ? filteredScreenshots[selectedIndex] ?? null : null;
 
   return (
     <>
@@ -195,10 +223,10 @@ export default function DashboardPage() {
                   <p className="text-sm text-gray-600">No screenshots match this tag</p>
                 ) : (
                   <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-                    {filteredScreenshots.map((shot) => (
+                    {filteredScreenshots.map((shot, index) => (
                       <div key={shot.id} className="flex flex-col">
                         <div
-                          onClick={() => setSelectedImage(shot.image_url)}
+                          onClick={() => setSelectedIndex(index)}
                           className="group relative h-48 cursor-pointer overflow-hidden rounded-xl shadow-sm transition hover:shadow-md"
                         >
                           <Image
@@ -244,16 +272,48 @@ export default function DashboardPage() {
           className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 transition-opacity duration-200 ease-out ${
             modalEntered ? "opacity-100" : "opacity-0"
           }`}
-          onClick={() => setSelectedImage(null)}
+          onClick={() => setSelectedIndex(null)}
         >
+          <button
+            type="button"
+            aria-label="Previous screenshot"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedIndex((prev) =>
+                prev !== null && prev > 0 ? prev - 1 : prev
+              );
+            }}
+            className="absolute left-4 top-1/2 z-10 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0 text-3xl leading-none text-white"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            aria-label="Next screenshot"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedIndex((prev) =>
+                prev !== null && prev < filteredScreenshots.length - 1
+                  ? prev + 1
+                  : prev
+              );
+            }}
+            className="absolute right-4 top-1/2 z-10 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0 text-3xl leading-none text-white"
+          >
+            →
+          </button>
           <img
-            src={selectedImage}
+            src={selectedImage.image_url}
             alt="Selected screenshot"
             onClick={(e) => e.stopPropagation()}
             className={`max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg transition-[opacity,transform] duration-200 ease-out ${
               modalEntered ? "scale-100 opacity-100" : "scale-[0.98] opacity-0"
             }`}
           />
+          <p className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 text-sm text-white">
+            {selectedIndex !== null ? selectedIndex + 1 : 0} /{" "}
+            {filteredScreenshots.length}
+          </p>
         </div>
       )}
     </>
