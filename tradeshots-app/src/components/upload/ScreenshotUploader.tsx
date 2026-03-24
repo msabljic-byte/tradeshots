@@ -13,6 +13,7 @@ export default function ScreenshotUploader({
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPasting, setIsPasting] = useState(false);
+  const [tagsInput, setTagsInput] = useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -62,12 +63,17 @@ export default function ScreenshotUploader({
         .getPublicUrl(fileName);
 
       const publicUrl = publicUrlData.publicUrl;
+      const tagsArray = tagsInput
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
 
       console.log("Uploading for user:", user.id);
 
       const { error: insertError } = await supabase.from("screenshots").insert({
         user_id: user.id,
         image_url: publicUrl,
+        tags: tagsArray,
       });
 
       if (insertError) {
@@ -79,6 +85,7 @@ export default function ScreenshotUploader({
       }
 
       setSuccessMessage("Screenshot uploaded successfully.");
+      setTagsInput("");
       setTimeout(() => {
         setSuccessMessage(null);
       }, 2500);
@@ -144,6 +151,15 @@ export default function ScreenshotUploader({
 
   return (
     <div className="mx-auto w-full max-w-xl rounded-2xl bg-white p-6 shadow-md">
+      <input
+        type="text"
+        value={tagsInput}
+        onChange={(e) => setTagsInput(e.target.value)}
+        placeholder="Add tags (comma separated)"
+        className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 mb-4 focus:outline-none focus:ring-2 focus:ring-gray-300"
+      />
+      <p className="mb-4 text-xs text-gray-500">example: breakout, reversal, fakeout</p>
+
       <input
         ref={fileInputRef}
         type="file"
