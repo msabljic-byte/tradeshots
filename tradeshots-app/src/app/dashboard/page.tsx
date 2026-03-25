@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
@@ -22,10 +22,19 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [tagFilter, setTagFilter] = useState("");
-  const [attributeFilter, setAttributeFilter] = useState("");
-  const [attributeValuesByScreenshot, setAttributeValuesByScreenshot] = useState<
-    Record<string, string[]>
+  const [allAttributes, setAllAttributes] = useState<any[]>([]);
+  const [attributeKeyValuesByScreenshot, setAttributeKeyValuesByScreenshot] = useState<
+    Record<string, Record<string, string[]>>
   >({});
+  const [filters, setFilters] = useState<
+    Array<{
+      key: string;
+      value: string;
+    }>
+  >([]);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [selectedKey, setSelectedKey] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
   const [currentNote, setCurrentNote] = useState("");
@@ -41,9 +50,31 @@ export default function DashboardPage() {
     setLoadedImages((prev) => ({ ...prev, [id]: true }));
   }
 
+  function addFilter(key: string, value: string) {
+    const normalizedKey = key.trim().toLowerCase();
+    const normalizedValue = value.trim().toLowerCase();
+    if (!normalizedKey || !normalizedValue) return;
+
+    setFilters((prev) => {
+      const exists = prev.some(
+        (f) => f.key === normalizedKey && f.value === normalizedValue
+      );
+      if (exists) return prev;
+      return [...prev, { key: normalizedKey, value: normalizedValue }];
+    });
+
+    setShowFilterMenu(false);
+    setSelectedKey("");
+    setSearchTerm("");
+  }
+
+  function removeFilter(index: number) {
+    setFilters((prev) => prev.filter((_, i) => i !== index));
+  }
+
   const fetchScreenshots = async () => {
     setLoading(true);
-    setAttributeValuesByScreenshot({});
+    setAttributeKeyValuesByScreenshot({});
 
     const {
       data: { session },
@@ -65,7 +96,7 @@ export default function DashboardPage() {
     if (screenshotsError) {
       setError(screenshotsError.message);
       setScreenshots([]);
-      setAttributeValuesByScreenshot({});
+      setAttributeKeyValuesByScreenshot({});
     } else {
       setError(null);
       const screenshotRows = (data ?? []) as ScreenshotRow[];
@@ -75,23 +106,30 @@ export default function DashboardPage() {
       if (screenshotIds.length > 0) {
         const { data: attrData, error: attrError } = await supabase
           .from("trade_attributes")
-          .select("screenshot_id,value")
+          .select("screenshot_id,key,value")
           .in("screenshot_id", screenshotIds);
 
         if (!attrError && attrData) {
-          const map: Record<string, string[]> = {};
+          const map: Record<string, Record<string, string[]>> = {};
           for (const row of attrData as any[]) {
             const sid = row.screenshot_id;
+            const key = row.key;
             const value = row.value;
             if (!sid) continue;
-            if (!map[sid]) map[sid] = [];
-            if (value !== null && value !== undefined) {
-              map[sid].push(String(value));
+            if (!map[sid]) map[sid] = {};
+            if (key !== null && key !== undefined && value !== null && value !== undefined) {
+              const keyLower = String(key).trim().toLowerCase();
+              const valueLower = String(value).trim().toLowerCase();
+              if (!keyLower || !valueLower) continue;
+              if (!map[sid][keyLower]) map[sid][keyLower] = [];
+              if (!map[sid][keyLower].includes(valueLower)) {
+                map[sid][keyLower].push(valueLower);
+              }
             }
           }
-          setAttributeValuesByScreenshot(map);
+          setAttributeKeyValuesByScreenshot(map);
         } else {
-          setAttributeValuesByScreenshot({});
+          setAttributeKeyValuesByScreenshot({});
         }
       }
     }
@@ -125,25 +163,99 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    async function fetchAllAttributes() {
+      const { data } = await supabase.from("trade_attributes").select("key,value");
+      setAllAttributes(data || []);
+    }
+
+    fetchAllAttributes();
+  }, []);
+
+  // Group attributes per screenshot to enable scalable multi-filter logic.
+  const attributesByScreenshot = useMemo(() => {
+    const result: Record<
+      string,
+      Array<{ key: string; value: string }>
+    > = {};
+
+    for (const [screenshotId, keyMap] of Object.entries(
+      attributeKeyValuesByScreenshot
+    )) {
+      const pairs: Array<{ key: string; value: string }> = [];
+      for (const [key, values] of Object.entries(keyMap ?? {})) {
+        for (const value of values ?? []) {
+          pairs.push({ key, value });
+        }
+      }
+      result[screenshotId] = pairs;
+    }
+
+    return result;
+  }, [attributeKeyValuesByScreenshot]);
+
+  const allAttributesNormalized = useMemo(() => {
+    return (allAttributes ?? [])
+      .map((a: any) => ({
+        key: String(a?.key ?? "").trim().toLowerCase(),
+        value: String(a?.value ?? "").trim().toLowerCase(),
+      }))
+      .filter((a) => a.key.length > 0 && a.value.length >0);
+  }, [allAttributes]);
+
+  const uniqueKeys = useMemo(() => {
+    return [
+      ...new Set(allAttributesNormalized.map((a) => a.key).filter(Boolean)),
+    ];
+  }, [allAttributesNormalized]);
+
+  const valuesForKey = useMemo(() => {
+    return [
+      ...new Set(
+        allAttributesNormalized
+          .filter((a) => a.key === selectedKey)
+          .map((a) => a.value)
+          .filter(Boolean)
+      ),
+    ];
+  }, [allAttributesNormalized, selectedKey]);
+
+  const filteredKeys = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return uniqueKeys;
+    return uniqueKeys.filter((k) => k.toLowerCase().includes(term));
+  }, [searchTerm, uniqueKeys]);
+
+  const filteredValues = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return valuesForKey;
+    return valuesForKey.filter((v) => v.toLowerCase().includes(term));
+  }, [searchTerm, valuesForKey]);
+
+  useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (showFilterMenu) {
+          setShowFilterMenu(false);
+          return;
+        }
         setSelectedIndex(null);
         return;
       }
 
+      if (showFilterMenu) return;
+
       const tagFilterLower = tagFilter.trim().toLowerCase();
-      const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
       const filteredScreenshots = screenshots.filter((s) => {
         const matchesTag =
           !tagFilterLower ||
           s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
 
-        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const pairs = attributesByScreenshot[s.id] ?? [];
         const matchesAttribute =
-          !attributeFilterLower ||
-          values.some((v) =>
-            v.toLowerCase().includes(attributeFilterLower)
+          filters.length === 0 ||
+          filters.every((f) =>
+            pairs.some((a) => a.key === f.key && a.value === f.value)
           );
 
         return matchesTag && matchesAttribute;
@@ -168,7 +280,14 @@ export default function DashboardPage() {
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [screenshots, tagFilter, attributeFilter, attributeValuesByScreenshot, selectedIndex]);
+  }, [
+    screenshots,
+    tagFilter,
+    filters,
+    attributesByScreenshot,
+    showFilterMenu,
+    selectedIndex,
+  ]);
 
   useEffect(() => {
     if (selectedIndex === null) {
@@ -195,24 +314,31 @@ export default function DashboardPage() {
     }
 
     const tagFilterLower = tagFilter.trim().toLowerCase();
-    const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
     const filtered = screenshots.filter((s) => {
       const matchesTag =
         !tagFilterLower ||
         s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
 
-      const values = attributeValuesByScreenshot[s.id] ?? [];
+      const pairs = attributesByScreenshot[s.id] ?? [];
       const matchesAttribute =
-        !attributeFilterLower ||
-        values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+        filters.length === 0 ||
+        filters.every((f) =>
+          pairs.some((a) => a.key === f.key && a.value === f.value)
+        );
 
       return matchesTag && matchesAttribute;
     });
 
     const shot = filtered[selectedIndex];
     setCurrentNote(shot?.notes ?? "");
-  }, [selectedIndex, screenshots, tagFilter, attributeFilter, attributeValuesByScreenshot]);
+  }, [
+    selectedIndex,
+    screenshots,
+    tagFilter,
+    filters,
+    attributesByScreenshot,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,17 +350,18 @@ export default function DashboardPage() {
       }
 
       const tagFilterLower = tagFilter.trim().toLowerCase();
-      const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
       const filtered = screenshots.filter((s) => {
         const matchesTag =
           !tagFilterLower ||
           s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
 
-        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const pairs = attributesByScreenshot[s.id] ?? [];
         const matchesAttribute =
-          !attributeFilterLower ||
-          values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+          filters.length === 0 ||
+          filters.every((f) =>
+            pairs.some((a) => a.key === f.key && a.value === f.value)
+          );
 
         return matchesTag && matchesAttribute;
       });
@@ -257,7 +384,12 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedIndex, tagFilter, attributeFilter, attributeValuesByScreenshot]);
+  }, [
+    selectedIndex,
+    tagFilter,
+    filters,
+    attributesByScreenshot,
+  ]);
 
   async function handleLogout() {
     setSigningOut(true);
@@ -281,17 +413,18 @@ export default function DashboardPage() {
     setError(null);
     try {
       const tagFilterLower = tagFilter.trim().toLowerCase();
-      const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
       const filtered = screenshots.filter((s) => {
         const matchesTag =
           !tagFilterLower ||
           s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
 
-        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const pairs = attributesByScreenshot[s.id] ?? [];
         const matchesAttribute =
-          !attributeFilterLower ||
-          values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+          filters.length === 0 ||
+          filters.every((f) =>
+            pairs.some((a) => a.key === f.key && a.value === f.value)
+          );
 
         return matchesTag && matchesAttribute;
       });
@@ -336,17 +469,18 @@ export default function DashboardPage() {
 
     try {
       const tagFilterLower = tagFilter.trim().toLowerCase();
-      const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
       const filtered = screenshots.filter((s) => {
         const matchesTag =
           !tagFilterLower ||
           s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
 
-        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const pairs = attributesByScreenshot[s.id] ?? [];
         const matchesAttribute =
-          !attributeFilterLower ||
-          values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+          filters.length === 0 ||
+          filters.every((f) =>
+            pairs.some((a) => a.key === f.key && a.value === f.value)
+          );
 
         return matchesTag && matchesAttribute;
       });
@@ -417,19 +551,22 @@ export default function DashboardPage() {
   }
 
   const tagFilterLower = tagFilter.trim().toLowerCase();
-  const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
   const filteredScreenshots = screenshots.filter((s) => {
     const matchesTag =
       !tagFilterLower ||
       s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
 
-    const values = attributeValuesByScreenshot[s.id] ?? [];
-    const matchesAttribute =
-      !attributeFilterLower ||
-      values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+    if (filters.length === 0) return matchesTag;
 
-    return matchesTag && matchesAttribute;
+    const pairs = attributesByScreenshot[s.id] ?? [];
+    const matchesAttributes = filters.every((filter) =>
+      pairs.some(
+        (a) => a.key === filter.key && a.value === filter.value
+      )
+    );
+
+    return matchesTag && matchesAttributes;
   });
 
   const selectedImage =
@@ -487,13 +624,102 @@ export default function DashboardPage() {
                   placeholder="Filter by tag..."
                   className="mb-6 w-full max-w-sm rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
                 />
-                <input
-                  type="text"
-                  value={attributeFilter}
-                  onChange={(e) => setAttributeFilter(e.target.value)}
-                  placeholder="Filter by attribute (e.g. Long)"
-                  className="mb-6 w-full max-w-sm rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
-                />
+                {/* Attribute filter bar (multi-filter AND) */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFilterMenu(true);
+                      setSelectedKey("");
+                      setSearchTerm("");
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm hover:bg-gray-100 transition"
+                  >
+                    + Add Filter
+                  </button>
+
+                  {filters.map((f, index) => (
+                    <div
+                      key={`${f.key}-${f.value}-${index}`}
+                      className="flex items-center gap-2 rounded-full bg-gray-900 text-white px-3 py-1 text-sm shadow-sm"
+                    >
+                      <span className="font-medium">
+                        {f.key}: {f.value}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeFilter(index)}
+                        className="text-white/70 hover:text-white transition"
+                        aria-label="Remove filter"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Command palette */}
+                {showFilterMenu && (
+                  <div
+                    className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-32"
+                    onClick={() => setShowFilterMenu(false)}
+                  >
+                    <div
+                      className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-4"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        autoFocus
+                        placeholder={
+                          selectedKey ? "Search value..." : "Search attribute..."
+                        }
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder-gray-500 outline-none"
+                      />
+
+                      <div className="mt-2 max-h-60 overflow-y-auto">
+                        {!selectedKey ? (
+                          filteredKeys.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-gray-500">
+                              No results found
+                            </div>
+                          ) : (
+                            filteredKeys.map((key) => (
+                              <div
+                                key={key}
+                                onClick={() => {
+                                  setSelectedKey(key);
+                                  setSearchTerm("");
+                                }}
+                                className="cursor-pointer px-3 py-2 text-sm text-gray-900 hover:bg-gray-100 rounded transition"
+                              >
+                                {key}
+                              </div>
+                            ))
+                          )
+                        ) : (
+                          filteredValues.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-gray-500">
+                              No results found
+                            </div>
+                          ) : (
+                            filteredValues.map((value) => (
+                              <div
+                                key={value}
+                                onClick={() => addFilter(selectedKey, value)}
+                                className="cursor-pointer px-3 py-2 text-sm text-gray-900 hover:bg-gray-100 rounded transition"
+                              >
+                                {value}
+                              </div>
+                            ))
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {filteredScreenshots.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <p className="text-lg font-semibold text-gray-900">
@@ -771,95 +997,100 @@ export default function DashboardPage() {
               ×
             </button>
 
-            {/* Image */}
-            <div className="flex flex-col items-center">
-              <div
-                className="relative z-[2147483645] transform transition-all duration-200 scale-95 opacity-0"
-                style={{ animation: "fadeIn 0.2s ease-out forwards" }}
-                onClick={(e) => e.stopPropagation()}
-              >
+            <div className="relative z-10 w-[90vw] max-w-6xl h-[85vh] bg-white rounded-2xl shadow-xl flex overflow-hidden">
+              {/* LEFT: IMAGE */}
+              <div className="flex-1 bg-black flex items-center justify-center">
                 <img
                   src={filteredScreenshots[selectedIndex!].image_url}
                   alt=""
-                  className="max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg"
+                  className="max-h-full max-w-full object-contain"
+                  onClick={(e) => e.stopPropagation()}
                 />
               </div>
 
-              <div className="relative z-10 mt-4 w-full max-w-xl">
-                <textarea
-                  value={currentNote}
-                  onChange={(e) => setCurrentNote(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-900"
-                  placeholder="Add notes about this trade..."
-                />
+              {/* RIGHT: PANEL */}
+              <div className="w-[380px] border-l flex flex-col p-4 overflow-y-auto">
+                {/* NOTES */}
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Notes</p>
+                  <textarea
+                    value={currentNote}
+                    onChange={(e) => setCurrentNote(e.target.value)}
+                    placeholder="Write your trade thoughts..."
+                    className="mt-2 w-full h-24 rounded-lg border border-gray-300 p-2 text-sm text-gray-900"
+                  />
 
-                <button
-                  type="button"
-                  onClick={handleSaveNote}
-                  disabled={savingNote}
-                  className="mt-2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800 transition"
-                >
-                  {savingNote ? "Saving note..." : "Save note"}
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveNote}
+                    disabled={savingNote}
+                    className="mt-2 w-full rounded-lg bg-gray-900 py-2 text-sm text-white hover:bg-gray-800 transition"
+                  >
+                    {savingNote ? "Saving note..." : "Save note"}
+                  </button>
 
-                {savedNoteToast && (
-                  <div className="mt-2 text-xs text-green-200">
-                    Saved ✓
+                  {savedNoteToast && (
+                    <div className="mt-2 text-xs text-green-200">Saved ✓</div>
+                  )}
+                </div>
+
+                {/* ATTRIBUTES */}
+                <div className="mt-6">
+                  <p className="text-sm font-semibold text-gray-900">Attributes</p>
+
+                  <div className="mt-2 space-y-2">
+                    {attributes.map((attr, index) => (
+                      <div key={attr.id ?? index} className="flex gap-2">
+                        <input
+                          value={attr.key || ""}
+                          onChange={(e) => {
+                            const updated = [...attributes];
+                            updated[index].key = e.target.value;
+                            setAttributes(updated);
+                          }}
+                          placeholder="Field"
+                          className="w-1/2 rounded-md border px-2 py-1 text-sm"
+                        />
+
+                        <input
+                          value={attr.value || ""}
+                          onChange={(e) => {
+                            const updated = [...attributes];
+                            updated[index].value = e.target.value;
+                            setAttributes(updated);
+                          }}
+                          placeholder="Value"
+                          className="w-1/2 rounded-md border px-2 py-1 text-sm"
+                        />
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
 
-              <div className="relative z-10 mt-4 w-full max-w-xl space-y-2">
-                {attributes.map((attr, index) => (
-                  <div key={attr.id ?? index} className="flex gap-2">
-                    <input
-                      value={attr.key || ""}
-                      onChange={(e) => {
-                        const updated = [...attributes];
-                        updated[index].key = e.target.value;
-                        setAttributes(updated);
-                      }}
-                      placeholder="Field (e.g. Direction)"
-                      className="w-1/2 rounded-lg border px-2 py-1 text-sm"
-                    />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAttributes([
+                        ...attributes,
+                        { id: `tmp-${Date.now()}-${Math.random()}`, key: "", value: "" },
+                      ])
+                    }
+                    className="mt-3 text-sm text-blue-600 hover:underline"
+                  >
+                    + Add field
+                  </button>
 
-                    <input
-                      value={attr.value || ""}
-                      onChange={(e) => {
-                        const updated = [...attributes];
-                        updated[index].value = e.target.value;
-                        setAttributes(updated);
-                      }}
-                      placeholder="Value (e.g. Long)"
-                      className="w-1/2 rounded-lg border px-2 py-1 text-sm"
-                    />
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAttributes([
-                      ...attributes,
-                      { id: `tmp-${Date.now()}-${Math.random()}`, key: "", value: "" },
-                    ])
-                  }
-                  className="text-sm text-blue-600"
-                >
-                  + Add field
-                </button>
-
-                <button
-                  type="button"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    await handleSaveAttributes();
-                  }}
-                  disabled={savingAttributes}
-                  className="mt-2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800 transition"
-                >
-                  {savingAttributes ? "Saving attributes..." : "Save attributes"}
-                </button>
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await handleSaveAttributes();
+                    }}
+                    disabled={savingAttributes}
+                    className="mt-3 w-full rounded-lg bg-gray-900 py-2 text-sm text-white hover:bg-gray-800 transition"
+                  >
+                    {savingAttributes ? "Saving attributes..." : "Save attributes"}
+                  </button>
+                </div>
               </div>
             </div>
 
