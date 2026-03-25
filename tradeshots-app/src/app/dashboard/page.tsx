@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
+import { createPortal } from "react-dom";
 
 type ScreenshotRow = {
   id: string;
@@ -17,20 +18,21 @@ export default function DashboardPage() {
   const [email, setEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
-  const [screenshotsLoading, setScreenshotsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [tagFilter, setTagFilter] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   function handleImageLoaded(id: string) {
     setLoadedImages((prev) => ({ ...prev, [id]: true }));
   }
 
   const fetchScreenshots = async () => {
-    setScreenshotsLoading(true);
+    setLoading(true);
 
     const {
       data: { session },
@@ -39,7 +41,7 @@ export default function DashboardPage() {
 
     if (!user) {
       setScreenshots([]);
-      setScreenshotsLoading(false);
+      setLoading(false);
       return;
     }
 
@@ -57,7 +59,7 @@ export default function DashboardPage() {
       setScreenshots((data ?? []) as ScreenshotRow[]);
     }
 
-    setScreenshotsLoading(false);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -80,6 +82,10 @@ export default function DashboardPage() {
       setCheckingSession(false);
     });
   }, [router]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -160,6 +166,14 @@ export default function DashboardPage() {
     );
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-sm text-gray-600">Loading screenshots...</p>
+      </div>
+    );
+  }
+
   const filteredScreenshots = screenshots.filter((s) => {
     if (!tagFilter) return true;
 
@@ -172,9 +186,8 @@ export default function DashboardPage() {
     selectedIndex !== null ? filteredScreenshots[selectedIndex] ?? null : null;
 
   return (
-    <>
-      <div className="min-h-screen bg-gray-50">
-        <div className="mx-auto max-w-6xl px-6 py-8 font-sans">
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-6xl px-6 py-8 font-sans">
           <div className="mb-6 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
             <h1 className="mb-3 text-2xl font-semibold text-gray-900">
               You are logged in
@@ -205,10 +218,16 @@ export default function DashboardPage() {
           </section>
 
           <section className="mt-6 space-y-3">
-            {screenshotsLoading ? (
-              <p className="text-sm text-gray-600">Loading screenshots...</p>
-            ) : screenshots.length === 0 ? (
-              <p className="text-sm text-gray-600">No screenshots yet</p>
+            {screenshots.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <p className="text-lg font-semibold text-gray-900">
+                  No screenshots yet
+                </p>
+
+                <p className="mt-2 text-sm text-gray-600">
+                  Upload or paste your first trade to get started
+                </p>
+              </div>
             ) : (
               <>
                 <input
@@ -219,7 +238,15 @@ export default function DashboardPage() {
                   className="mb-6 w-full max-w-sm rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
                 />
                 {filteredScreenshots.length === 0 ? (
-                  <p className="text-sm text-gray-600">No screenshots match this tag</p>
+                  <div className="flex flex-col items-center justify-center py-20 text-center">
+                    <p className="text-lg font-semibold text-gray-900">
+                      No screenshots yet
+                    </p>
+
+                    <p className="mt-2 text-sm text-gray-600">
+                      Upload or paste your first trade to get started
+                    </p>
+                  </div>
                 ) : (
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredScreenshots.map((shot, index) => (
@@ -250,9 +277,9 @@ export default function DashboardPage() {
                           />
                         </div>
 
-                        <div className="flex flex-col flex-grow px-3 pb-3">
+                        <div className="flex flex-col justify-center flex-grow px-3 py-3 min-h-[3.5rem]">
                           {shot.tags && shot.tags.length > 0 && (
-                            <div className="mt-auto flex flex-wrap gap-1">
+                            <div className="flex flex-wrap gap-1">
                               {shot.tags?.map((tag, i) => (
                                 <span
                                   key={`${shot.id}-${tag}-${i}`}
@@ -271,17 +298,22 @@ export default function DashboardPage() {
               </>
             )}
           </section>
-        </div>
       </div>
 
-      {selectedImage && (
+      {false && (
         <div
-          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-200 relative group ${
+          className={`fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-200 relative group ${
             modalEntered ? "opacity-100" : "opacity-0"
           }`}
-          onClick={() => setSelectedIndex(null)}
         >
-          {selectedIndex !== null && selectedIndex > 0 && (
+          {/* ✅ Close when clicking background */}
+          <div
+            className="absolute inset-0"
+            onClick={() => setSelectedIndex(null)}
+          />
+
+          {/* LEFT arrow */}
+          {selectedIndex !== null && selectedIndex! > 0 && (
             <button
               type="button"
               onClick={(e) => {
@@ -292,7 +324,7 @@ export default function DashboardPage() {
               }}
               className="
                 absolute left-4 top-1/2 -translate-y-1/2
-                z-50
+                z-[100000]
                 text-white text-3xl
                 bg-black/40
                 w-12 h-12
@@ -308,8 +340,9 @@ export default function DashboardPage() {
             </button>
           )}
 
+          {/* RIGHT arrow */}
           {selectedIndex !== null &&
-            selectedIndex < filteredScreenshots.length - 1 && (
+            selectedIndex! < filteredScreenshots.length - 1 && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -322,7 +355,7 @@ export default function DashboardPage() {
                 }}
                 className="
                   absolute right-4 top-1/2 -translate-y-1/2
-                  z-50
+                  z-[100000]
                   text-white text-3xl
                   bg-black/40
                   w-12 h-12
@@ -337,12 +370,14 @@ export default function DashboardPage() {
                 →
               </button>
             )}
+
+          {/* Close (X) */}
           <button
             type="button"
             onClick={() => setSelectedIndex(null)}
             aria-label="Close modal"
             className="
-              absolute top-4 right-4
+              absolute top-4 right-4 z-[100000]
               text-white text-xl
               bg-black/50 hover:bg-black/70
               rounded-full w-10 h-10
@@ -352,20 +387,25 @@ export default function DashboardPage() {
           >
             ×
           </button>
+
+          {/* Image */}
           <div
-            className="transform transition-all duration-200 scale-95 opacity-0"
+            className="relative z-10 transform transition-all duration-200 scale-95 opacity-0"
             style={{ animation: "fadeIn 0.2s ease-out forwards" }}
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={selectedImage.image_url}
-              alt="Selected screenshot"
+              src={filteredScreenshots[selectedIndex!].image_url}
+              alt=""
               className="max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg"
             />
           </div>
+
+          {/* Counter */}
           <div
             className="
               absolute bottom-4 left-1/2 -translate-x-1/2
+              z-50
               text-white text-sm
               bg-black/50 px-3 py-1 rounded-full
             "
@@ -374,7 +414,134 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-    </>
+      {mounted &&
+        selectedImage &&
+        createPortal(
+          <div
+            className="flex items-center justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-200 relative group opacity-100"
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 2147483647,
+              transform: "none",
+              width: "100vw",
+              height: "100vh",
+              pointerEvents: "auto",
+            }}
+          >
+            {/* ✅ Close when clicking background */}
+            <div
+              className="absolute inset-0"
+              onClick={() => setSelectedIndex(null)}
+            />
+
+            {/* LEFT arrow */}
+            {selectedIndex !== null && selectedIndex! > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedIndex((prev) =>
+                    prev !== null && prev > 0 ? prev - 1 : prev
+                  );
+                }}
+                className="
+                  absolute left-4 top-1/2 -translate-y-1/2
+                  z-[2147483646]
+                  text-white text-3xl
+                  bg-black/40
+                  w-12 h-12
+                  rounded-full
+                  flex items-center justify-center
+                  cursor-pointer
+                  transition-all duration-200
+                  opacity-0 group-hover:opacity-100
+                  hover:bg-black/60
+                "
+              >
+                ←
+              </button>
+            )}
+
+            {/* RIGHT arrow */}
+            {selectedIndex !== null &&
+              selectedIndex! < filteredScreenshots.length - 1 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedIndex((prev) =>
+                      prev !== null && prev < filteredScreenshots.length - 1
+                        ? prev + 1
+                        : prev
+                    );
+                  }}
+                  className="
+                    absolute right-4 top-1/2 -translate-y-1/2
+                  z-[2147483646]
+                    text-white text-3xl
+                    bg-black/40
+                    w-12 h-12
+                    rounded-full
+                    flex items-center justify-center
+                    cursor-pointer
+                    transition-all duration-200
+                    opacity-0 group-hover:opacity-100
+                    hover:bg-black/60
+                  "
+                >
+                  →
+                </button>
+              )}
+
+            {/* Close (X) */}
+            <button
+              type="button"
+              onClick={() => setSelectedIndex(null)}
+              aria-label="Close modal"
+              className="
+                absolute top-4 right-4 z-[2147483646]
+                text-white text-xl
+                bg-black/50 hover:bg-black/70
+                rounded-full w-10 h-10
+                flex items-center justify-center
+                transition
+              "
+            >
+              ×
+            </button>
+
+            {/* Image */}
+            <div
+              className="relative z-[2147483645] transform transition-all duration-200 scale-95 opacity-0"
+              style={{ animation: "fadeIn 0.2s ease-out forwards" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={filteredScreenshots[selectedIndex!].image_url}
+                alt=""
+                className="max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg"
+              />
+            </div>
+
+            {/* Counter */}
+            <div
+              className="
+                absolute bottom-4 left-1/2 -translate-x-1/2
+              z-[2147483644]
+                text-white text-sm
+                bg-black/50 px-3 py-1 rounded-full
+              "
+            >
+              {selectedIndex! + 1} / {filteredScreenshots.length}
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
   );
 }
 

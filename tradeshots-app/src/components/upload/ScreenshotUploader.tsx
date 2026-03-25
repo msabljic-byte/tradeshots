@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function ScreenshotUploader({
@@ -13,9 +13,46 @@ export default function ScreenshotUploader({
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPasting, setIsPasting] = useState(false);
-  const [tagsInput, setTagsInput] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  function normalizeTag(tag: string) {
+    return tag.trim();
+  }
+
+  function addTagsFromString(value: string) {
+    const parts = value
+      .split(",")
+      .map(normalizeTag)
+      .filter((t) => t.length > 0);
+
+    if (parts.length === 0) return;
+
+    setTags((prev) => {
+      const seen = new Set(prev.map((t) => t.toLowerCase()));
+      const next = [...prev];
+      for (const t of parts) {
+        const key = t.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        next.push(t);
+      }
+      return next;
+    });
+  }
+
+  function commitDraft() {
+    const t = normalizeTag(tagDraft);
+    if (!t) return;
+    addTagsFromString(t);
+    setTagDraft("");
+  }
+
+  function removeTag(tagToRemove: string) {
+    setTags((prev) => prev.filter((t) => t !== tagToRemove));
+  }
 
   function openFilePicker() {
     fileInputRef.current?.click();
@@ -63,10 +100,14 @@ export default function ScreenshotUploader({
         .getPublicUrl(fileName);
 
       const publicUrl = publicUrlData.publicUrl;
-      const tagsArray = tagsInput
+      const draftTags = tagDraft
         .split(",")
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0);
+        .map(normalizeTag)
+        .filter((t) => t.length > 0);
+      const tagsArray = [...tags, ...draftTags].filter((t, i, arr) => {
+        const key = t.toLowerCase();
+        return arr.findIndex((x) => x.toLowerCase() === key) === i;
+      });
 
       console.log("Uploading for user:", user.id);
 
@@ -85,7 +126,8 @@ export default function ScreenshotUploader({
       }
 
       setSuccessMessage("Screenshot uploaded successfully.");
-      setTagsInput("");
+      setTags([]);
+      setTagDraft("");
       setTimeout(() => {
         setSuccessMessage(null);
       }, 2500);
@@ -120,7 +162,7 @@ export default function ScreenshotUploader({
     };
   }, []);
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -130,7 +172,7 @@ export default function ScreenshotUploader({
     e.target.value = "";
   }
 
-  async function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+  async function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragActive(false);
 
@@ -140,7 +182,7 @@ export default function ScreenshotUploader({
     await uploadScreenshot(file);
   }
 
-  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+  function handleDragOver(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragActive(true);
   }
@@ -151,13 +193,54 @@ export default function ScreenshotUploader({
 
   return (
     <div className="mx-auto w-full max-w-xl rounded-2xl bg-white p-6 shadow-md">
-      <input
-        type="text"
-        value={tagsInput}
-        onChange={(e) => setTagsInput(e.target.value)}
-        placeholder="Add tags (comma separated)"
-        className="w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 mb-4 focus:outline-none focus:ring-2 focus:ring-gray-300"
-      />
+      <div className="mb-4">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus-within:ring-2 focus-within:ring-gray-300 transition">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="relative inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
+            >
+              {tag}
+              <button
+                type="button"
+                aria-label={`Remove tag ${tag}`}
+                onClick={() => removeTag(tag)}
+                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gray-300 text-[10px] leading-none text-gray-800 hover:bg-gray-400"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <input
+            type="text"
+            value={tagDraft}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next.includes(",")) {
+                const parts = next.split(",");
+                const complete = parts.slice(0, -1).join(",");
+                const remainder = parts[parts.length - 1] ?? "";
+                addTagsFromString(complete);
+                setTagDraft(remainder);
+                return;
+              }
+              setTagDraft(next);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "," || e.key === "Enter") {
+                e.preventDefault();
+                commitDraft();
+                return;
+              }
+              if (e.key === "Backspace" && tagDraft.length === 0 && tags.length > 0) {
+                setTags((prev) => prev.slice(0, -1));
+              }
+            }}
+            placeholder={tags.length === 0 ? "Add tags (comma separated)" : "Add another tag..."}
+            className="min-w-[10ch] flex-1 bg-transparent px-1 py-1 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none"
+          />
+        </div>
+      </div>
       <p className="mb-4 text-xs text-gray-500">example: breakout, reversal, fakeout</p>
 
       <input
@@ -202,8 +285,8 @@ export default function ScreenshotUploader({
       </div>
 
       {successMessage && (
-        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 transition-opacity duration-300">
-          {successMessage}
+        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 transition">
+          Screenshot uploaded successfully ✓
         </div>
       )}
 
