@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
 
@@ -174,9 +173,9 @@ export default function DashboardPage() {
 
   return (
     <>
-      <main className="min-h-screen bg-gray-50 font-sans">
-        <div className="mx-auto max-w-5xl space-y-6 p-6">
-          <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <div className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-6xl px-6 py-8 font-sans">
+          <div className="mb-6 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
             <h1 className="mb-3 text-2xl font-semibold text-gray-900">
               You are logged in
             </h1>
@@ -205,7 +204,7 @@ export default function DashboardPage() {
             <ScreenshotUploader onUploadComplete={fetchScreenshots} />
           </section>
 
-          <section className="space-y-3">
+          <section className="mt-6 space-y-3">
             {screenshotsLoading ? (
               <p className="text-sm text-gray-600">Loading screenshots...</p>
             ) : screenshots.length === 0 ? (
@@ -217,46 +216,54 @@ export default function DashboardPage() {
                   value={tagFilter}
                   onChange={(e) => setTagFilter(e.target.value)}
                   placeholder="Filter by tag..."
-                  className="mb-4 w-full max-w-sm border rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+                  className="mb-6 w-full max-w-sm rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
                 />
                 {filteredScreenshots.length === 0 ? (
                   <p className="text-sm text-gray-600">No screenshots match this tag</p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredScreenshots.map((shot, index) => (
-                      <div key={shot.id} className="flex flex-col">
-                        <div
-                          onClick={() => setSelectedIndex(index)}
-                          className="group relative h-48 cursor-pointer overflow-hidden rounded-xl shadow-sm transition hover:shadow-md"
-                        >
-                          <Image
+                      <div
+                        key={shot.id}
+                        onClick={() => setSelectedIndex(index)}
+                        className="
+                          group
+                          flex flex-col h-full
+                          rounded-xl
+                          overflow-hidden
+                          bg-white
+                          border border-gray-200
+                          shadow-sm
+                          hover:shadow-md
+                          transition-all duration-200
+                          cursor-pointer
+                        "
+                      >
+                        <div className="w-full aspect-[4/3] overflow-hidden bg-gray-100">
+                          <img
                             src={shot.image_url}
                             alt="Uploaded screenshot"
-                            fill
                             onLoad={() => handleImageLoaded(shot.id)}
-                            className={`object-cover transition duration-300 ${
+                            className={`w-full h-full object-cover cursor-pointer transition-transform duration-200 group-hover:scale-[1.02] ${
                               loadedImages[shot.id] ? "opacity-100" : "opacity-0"
-                            } group-hover:scale-[1.02]`}
+                            }`}
                           />
-                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-black/10 to-transparent opacity-0 transition duration-200 group-hover:opacity-100" />
-                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition duration-200 group-hover:opacity-100">
-                            <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-gray-900 shadow-sm">
-                              View
-                            </span>
-                          </div>
                         </div>
-                        {shot.tags && shot.tags.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {shot.tags?.map((tag, i) => (
-                              <span
-                                key={`${shot.id}-${tag}-${i}`}
-                                className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+
+                        <div className="flex flex-col flex-grow px-3 pb-3">
+                          {shot.tags && shot.tags.length > 0 && (
+                            <div className="mt-auto flex flex-wrap gap-1">
+                              {shot.tags?.map((tag, i) => (
+                                <span
+                                  key={`${shot.id}-${tag}-${i}`}
+                                  className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -265,7 +272,7 @@ export default function DashboardPage() {
             )}
           </section>
         </div>
-      </main>
+      </div>
 
       {selectedImage && (
         <div
