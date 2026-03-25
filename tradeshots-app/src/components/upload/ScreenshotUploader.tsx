@@ -192,7 +192,7 @@ export default function ScreenshotUploader({
   }
 
   return (
-    <div className="mx-auto w-full max-w-xl rounded-2xl bg-white p-6 shadow-md">
+    <div className="w-full rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
       <div className="mb-4">
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus-within:ring-2 focus-within:ring-gray-300 transition">
           {tags.map((tag) => (
@@ -264,23 +264,26 @@ export default function ScreenshotUploader({
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-200 ${
-          isDragActive
-            ? "border-gray-400 bg-gray-50"
-            : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
-        } ${isUploading ? "pointer-events-none opacity-50" : ""}`}
+        className={`
+cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-200 ease-out
+${isDragActive
+  ? "border-gray-900 bg-gray-100 scale-[1.01]"
+  : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+}
+${isUploading ? "pointer-events-none opacity-50" : ""}
+`.trim()}
       >
         <p className="text-lg font-semibold text-gray-900">
           Drag & drop your screenshot
         </p>
         <p className="mt-2 text-sm text-gray-600">or click to upload</p>
-        <p className="mt-1 text-xs text-gray-500">or paste screenshot (Ctrl + V)</p>
+        <p className="mt-1 text-xs text-gray-600">or paste screenshot (Ctrl + V)</p>
 
         {isUploading && (
-          <p className="mt-4 text-sm font-medium text-gray-700">Uploading...</p>
+          <p className="mt-4 text-sm font-medium text-gray-600">Uploading...</p>
         )}
         {isPasting && (
-          <p className="mt-2 text-sm font-medium text-gray-700">Pasting screenshot...</p>
+          <p className="mt-2 text-sm font-medium text-gray-600">Pasting screenshot...</p>
         )}
       </div>
 

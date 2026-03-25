@@ -163,6 +163,20 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    if (selectedIndex === null) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, [selectedIndex]);
+
+  useEffect(() => {
     async function fetchAllAttributes() {
       const { data } = await supabase.from("trade_attributes").select("key,value");
       setAllAttributes(data || []);
@@ -534,18 +548,20 @@ export default function DashboardPage() {
 
   if (checkingSession) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6 font-sans">
-        <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <p className="text-sm text-zinc-600">Checking your session...</p>
+      <div className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
+          <p className="text-sm text-gray-600">Checking your session...</p>
         </div>
-      </main>
+      </div>
     );
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-gray-600">Loading screenshots...</p>
+      <div className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
+          <p className="text-sm text-gray-600">Loading screenshots...</p>
+        </div>
       </div>
     );
   }
@@ -574,213 +590,198 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-6xl px-6 py-8 font-sans">
-          <div className="mb-6 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <h1 className="mb-3 text-2xl font-semibold text-gray-900">
-              You are logged in
-            </h1>
-            <div className="mb-6 rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-900">
-              Signed in as:{" "}
-              <span className="font-medium text-gray-900">{email ?? "unknown"}</span>
-            </div>
-
-            {error && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
+      <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="text-xl font-semibold text-gray-900">TradeShots</h1>
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-gray-600">{email ?? ""}</div>
             <button
+              type="button"
               onClick={handleLogout}
               disabled={signingOut}
-              className="h-11 w-full rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+              className="text-sm font-medium text-gray-700 transition hover:text-gray-900 disabled:opacity-60"
             >
-              {signingOut ? "Signing out..." : "Log out"}
+              {signingOut ? "Signing out…" : "Log out"}
             </button>
           </div>
+        </div>
 
-          <section className="space-y-3">
-            <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
-            <ScreenshotUploader onUploadComplete={fetchScreenshots} />
-          </section>
+        {error && (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
-          <section className="mt-6 space-y-3">
-            {screenshots.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="mb-6">
+          <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
+        </div>
+
+        <div className="mb-6">
+          <ScreenshotUploader onUploadComplete={fetchScreenshots} />
+        </div>
+
+        {screenshots.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <p className="text-lg font-medium text-gray-900">No screenshots yet</p>
+            <p className="mt-2 text-sm text-gray-600">
+              Upload your first trade to get started
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+              <input
+                type="text"
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+                placeholder="Filter by tag..."
+                className="mb-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFilterMenu(true);
+                    setSelectedKey("");
+                    setSearchTerm("");
+                  }}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition hover:bg-gray-100"
+                >
+                  + Add Filter
+                </button>
+
+                {filters.map((f, index) => (
+                  <div
+                    key={`${f.key}-${f.value}-${index}`}
+                    className="flex items-center gap-2 rounded-full bg-gray-900 px-3 py-1 text-sm text-white shadow-sm"
+                  >
+                    <span className="font-medium">
+                      {f.key}: {f.value}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeFilter(index)}
+                      className="text-white/70 transition hover:text-white"
+                      aria-label="Remove filter"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {showFilterMenu && (
+                <div
+                  className="fixed inset-0 z-50 flex cursor-pointer items-start justify-center bg-black/40 pt-32"
+                  onClick={() => setShowFilterMenu(false)}
+                >
+                  <div
+                    className="w-full max-w-md cursor-default rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      autoFocus
+                      placeholder={
+                        selectedKey ? "Search value..." : "Search attribute..."
+                      }
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder:text-gray-500 outline-none"
+                    />
+
+                    <div className="mt-2 max-h-60 overflow-y-auto">
+                      {!selectedKey ? (
+                        filteredKeys.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            No results found
+                          </div>
+                        ) : (
+                          filteredKeys.map((key) => (
+                            <div
+                              key={key}
+                              onClick={() => {
+                                setSelectedKey(key);
+                                setSearchTerm("");
+                              }}
+                              className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 transition hover:bg-gray-100"
+                            >
+                              {key}
+                            </div>
+                          ))
+                        )
+                      ) : filteredValues.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">
+                          No results found
+                        </div>
+                      ) : (
+                        filteredValues.map((value) => (
+                          <div
+                            key={value}
+                            onClick={() => addFilter(selectedKey, value)}
+                            className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 transition hover:bg-gray-100"
+                          >
+                            {value}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {filteredScreenshots.length === 0 ? (
+              <div className="py-12">
                 <p className="text-lg font-semibold text-gray-900">
-                  No screenshots yet
+                  No matching screenshots
                 </p>
-
                 <p className="mt-2 text-sm text-gray-600">
-                  Upload or paste your first trade to get started
+                  Try adjusting tags or filters
                 </p>
               </div>
             ) : (
-              <>
-                <input
-                  type="text"
-                  value={tagFilter}
-                  onChange={(e) => setTagFilter(e.target.value)}
-                  placeholder="Filter by tag..."
-                  className="mb-6 w-full max-w-sm rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
-                />
-                {/* Attribute filter bar (multi-filter AND) */}
-                <div className="flex flex-wrap items-center gap-2 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowFilterMenu(true);
-                      setSelectedKey("");
-                      setSearchTerm("");
-                    }}
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm hover:bg-gray-100 transition"
-                  >
-                    + Add Filter
-                  </button>
-
-                  {filters.map((f, index) => (
-                    <div
-                      key={`${f.key}-${f.value}-${index}`}
-                      className="flex items-center gap-2 rounded-full bg-gray-900 text-white px-3 py-1 text-sm shadow-sm"
-                    >
-                      <span className="font-medium">
-                        {f.key}: {f.value}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeFilter(index)}
-                        className="text-white/70 hover:text-white transition"
-                        aria-label="Remove filter"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Command palette */}
-                {showFilterMenu && (
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+                {filteredScreenshots.map((shot, index) => (
                   <div
-                    className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-32"
-                    onClick={() => setShowFilterMenu(false)}
+                    key={shot.id}
+                    onClick={() => setSelectedIndex(index)}
+                    className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
                   >
-                    <div
-                      className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-4"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        autoFocus
-                        placeholder={
-                          selectedKey ? "Search value..." : "Search attribute..."
-                        }
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder-gray-500 outline-none"
+                    <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+                      <img
+                        src={shot.image_url}
+                        alt="Uploaded screenshot"
+                        onLoad={() => handleImageLoaded(shot.id)}
+                        className={`h-48 w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] ${
+                          loadedImages[shot.id] ? "opacity-100" : "opacity-0"
+                        }`}
                       />
-
-                      <div className="mt-2 max-h-60 overflow-y-auto">
-                        {!selectedKey ? (
-                          filteredKeys.length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-gray-500">
-                              No results found
-                            </div>
-                          ) : (
-                            filteredKeys.map((key) => (
-                              <div
-                                key={key}
-                                onClick={() => {
-                                  setSelectedKey(key);
-                                  setSearchTerm("");
-                                }}
-                                className="cursor-pointer px-3 py-2 text-sm text-gray-900 hover:bg-gray-100 rounded transition"
-                              >
-                                {key}
-                              </div>
-                            ))
-                          )
-                        ) : (
-                          filteredValues.length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-gray-500">
-                              No results found
-                            </div>
-                          ) : (
-                            filteredValues.map((value) => (
-                              <div
-                                key={value}
-                                onClick={() => addFilter(selectedKey, value)}
-                                className="cursor-pointer px-3 py-2 text-sm text-gray-900 hover:bg-gray-100 rounded transition"
-                              >
-                                {value}
-                              </div>
-                            ))
-                          )
-                        )}
+                      <div className="pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover:bg-black/10" />
+                      <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                        View
                       </div>
                     </div>
-                  </div>
-                )}
 
-                {filteredScreenshots.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20 text-center">
-                    <p className="text-lg font-semibold text-gray-900">
-                      No screenshots yet
-                    </p>
-
-                    <p className="mt-2 text-sm text-gray-600">
-                      Upload or paste your first trade to get started
-                    </p>
-                  </div>
-                ) : (
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredScreenshots.map((shot, index) => (
-                      <div
-                        key={shot.id}
-                        onClick={() => setSelectedIndex(index)}
-                        className="
-                          group
-                          flex flex-col h-full
-                          rounded-xl
-                          overflow-hidden
-                          bg-white
-                          border border-gray-200
-                          shadow-sm
-                          hover:shadow-md
-                          transition-all duration-200
-                          cursor-pointer
-                        "
-                      >
-                        <div className="w-full aspect-[4/3] overflow-hidden bg-gray-100">
-                          <img
-                            src={shot.image_url}
-                            alt="Uploaded screenshot"
-                            onLoad={() => handleImageLoaded(shot.id)}
-                            className={`w-full h-full object-cover cursor-pointer transition-transform duration-200 group-hover:scale-[1.02] ${
-                              loadedImages[shot.id] ? "opacity-100" : "opacity-0"
-                            }`}
-                          />
+                    <div className="flex min-h-[3.5rem] flex-grow flex-col justify-center px-3 py-3">
+                      {shot.tags && shot.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {shot.tags?.map((tag, i) => (
+                            <span
+                              key={`${shot.id}-${tag}-${i}`}
+                              className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
+                            >
+                              {tag}
+                            </span>
+                          ))}
                         </div>
-
-                        <div className="flex flex-col justify-center flex-grow px-3 py-3 min-h-[3.5rem]">
-                          {shot.tags && shot.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {shot.tags?.map((tag, i) => (
-                                <span
-                                  key={`${shot.id}-${tag}-${i}`}
-                                  className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                      )}
+                    </div>
                   </div>
-                )}
-              </>
+                ))}
+              </div>
             )}
-          </section>
+          </>
+        )}
       </div>
 
       {false && (
@@ -901,115 +902,33 @@ export default function DashboardPage() {
         selectedImage &&
         createPortal(
           <div
-            className="flex items-center justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-200 relative group opacity-100"
+            className="fixed inset-0 z-[2147483647] overflow-hidden bg-black/70 backdrop-blur-sm transition-opacity duration-200 group opacity-100"
             style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 2147483647,
               transform: "none",
-              width: "100vw",
-              height: "100vh",
               pointerEvents: "auto",
             }}
           >
-            {/* ✅ Close when clicking background */}
+            {/* Dismiss layer (behind sheet) */}
             <div
-              className="absolute inset-0"
+              className="absolute inset-0 z-0 cursor-pointer"
               onClick={() => setSelectedIndex(null)}
             />
 
-            {/* LEFT arrow */}
-            {selectedIndex !== null && selectedIndex! > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedIndex((prev) =>
-                    prev !== null && prev > 0 ? prev - 1 : prev
-                  );
-                }}
-                className="
-                  absolute left-4 top-1/2 -translate-y-1/2
-                  z-[2147483646]
-                  text-white text-3xl
-                  bg-black/40
-                  w-12 h-12
-                  rounded-full
-                  flex items-center justify-center
-                  cursor-pointer
-                  transition-all duration-200
-                  opacity-0 group-hover:opacity-100
-                  hover:bg-black/60
-                "
-              >
-                ←
-              </button>
-            )}
-
-            {/* RIGHT arrow */}
-            {selectedIndex !== null &&
-              selectedIndex! < filteredScreenshots.length - 1 && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedIndex((prev) =>
-                      prev !== null && prev < filteredScreenshots.length - 1
-                        ? prev + 1
-                        : prev
-                    );
-                  }}
-                  className="
-                    absolute right-4 top-1/2 -translate-y-1/2
-                  z-[2147483646]
-                    text-white text-3xl
-                    bg-black/40
-                    w-12 h-12
-                    rounded-full
-                    flex items-center justify-center
-                    cursor-pointer
-                    transition-all duration-200
-                    opacity-0 group-hover:opacity-100
-                    hover:bg-black/60
-                  "
-                >
-                  →
-                </button>
-              )}
-
-            {/* Close (X) */}
-            <button
-              type="button"
-              onClick={() => setSelectedIndex(null)}
-              aria-label="Close modal"
-              className="
-                absolute top-4 right-4 z-[2147483646]
-                text-white text-xl
-                bg-black/50 hover:bg-black/70
-                rounded-full w-10 h-10
-                flex items-center justify-center
-                transition
-              "
-            >
-              ×
-            </button>
-
-            <div className="relative z-10 w-[90vw] max-w-6xl h-[85vh] bg-white rounded-2xl shadow-xl flex overflow-hidden">
+            <div className="absolute inset-0 z-10 flex min-h-0 min-w-0 overflow-hidden bg-white shadow-xl">
               {/* LEFT: IMAGE */}
-              <div className="flex-1 bg-black flex items-center justify-center">
-                <img
-                  src={filteredScreenshots[selectedIndex!].image_url}
-                  alt=""
-                  className="max-h-full max-w-full object-contain"
-                  onClick={(e) => e.stopPropagation()}
-                />
+              <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
+                <div className="flex h-full min-h-0 w-full items-center justify-center p-2">
+                  <img
+                    src={filteredScreenshots[selectedIndex!].image_url}
+                    alt=""
+                    className="max-h-full max-w-full w-auto cursor-default object-contain"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
               </div>
 
-              {/* RIGHT: PANEL */}
-              <div className="w-[380px] border-l flex flex-col p-4 overflow-y-auto">
+              {/* RIGHT: PANEL — only this column scrolls when content is tall */}
+              <div className="box-border flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-y-auto overflow-x-hidden border-l border-gray-200 p-4">
                 {/* NOTES */}
                 <div>
                   <p className="text-sm font-semibold text-gray-900">Notes</p>
@@ -1094,14 +1013,69 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Counter */}
+            {/* Fixed controls — above sheet + image so they’re never covered or clipped */}
+            <button
+              type="button"
+              onClick={() => setSelectedIndex(null)}
+              aria-label="Close modal"
+              className="fixed top-4 z-[2147483646] flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-xl text-white shadow-lg ring-2 ring-white/30 transition hover:bg-zinc-800"
+              style={{
+                right: "clamp(1rem, calc(320px + 1rem), calc(100vw - 3rem))",
+              }}
+            >
+              ×
+            </button>
+
+            {selectedIndex !== null && selectedIndex! > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedIndex((prev) =>
+                    prev !== null && prev > 0 ? prev - 1 : prev
+                  );
+                }}
+                className="
+                  fixed left-4 top-1/2 z-[2147483646] -translate-y-1/2
+                  flex h-12 w-12 items-center justify-center rounded-full
+                  bg-black/50 text-3xl text-white shadow-lg
+                  opacity-0 transition-all duration-200 hover:bg-black/70
+                  group-hover:opacity-100
+                "
+              >
+                ←
+              </button>
+            )}
+
+            {selectedIndex !== null &&
+              selectedIndex! < filteredScreenshots.length - 1 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedIndex((prev) =>
+                      prev !== null && prev < filteredScreenshots.length - 1
+                        ? prev + 1
+                        : prev
+                    );
+                  }}
+                  className="
+                    fixed top-1/2 z-[2147483646] -translate-y-1/2
+                    flex h-12 w-12 items-center justify-center rounded-full
+                    bg-black/50 text-3xl text-white shadow-lg
+                    opacity-0 transition-all duration-200 hover:bg-black/70
+                    group-hover:opacity-100
+                  "
+                  style={{
+                    right: "clamp(1rem, calc(320px + 1rem), calc(100vw - 3rem))",
+                  }}
+                >
+                  →
+                </button>
+              )}
+
             <div
-              className="
-                absolute bottom-4 left-1/2 -translate-x-1/2
-              z-[2147483644]
-                text-white text-sm
-                bg-black/50 px-3 py-1 rounded-full
-              "
+              className="fixed bottom-4 left-1/2 z-[2147483645] -translate-x-1/2 rounded-full bg-black/50 px-3 py-1 text-sm text-white"
             >
               {selectedIndex! + 1} / {filteredScreenshots.length}
             </div>
