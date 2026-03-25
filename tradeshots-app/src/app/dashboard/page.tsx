@@ -42,6 +42,7 @@ export default function DashboardPage() {
   const [savedNoteToast, setSavedNoteToast] = useState(false);
   const [attributes, setAttributes] = useState<any[]>([]);
   const [savingAttributes, setSavingAttributes] = useState(false);
+  const [savedAttributesToast, setSavedAttributesToast] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -252,7 +253,6 @@ export default function DashboardPage() {
           setShowFilterMenu(false);
           return;
         }
-        setSelectedIndex(null);
         return;
       }
 
@@ -302,6 +302,19 @@ export default function DashboardPage() {
     showFilterMenu,
     selectedIndex,
   ]);
+
+  useEffect(() => {
+    if (selectedIndex === null) return;
+
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setSelectedIndex(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [selectedIndex]);
 
   useEffect(() => {
     if (selectedIndex === null) {
@@ -531,7 +544,11 @@ export default function DashboardPage() {
         }))
         .filter((r) => r.key.trim().length > 0);
 
-      if (rows.length === 0) return;
+      if (rows.length === 0) {
+        setSavedAttributesToast(true);
+        setTimeout(() => setSavedAttributesToast(false), 2000);
+        return;
+      }
 
       const { error: insertError } = await supabase
         .from("trade_attributes")
@@ -541,6 +558,9 @@ export default function DashboardPage() {
         setError(insertError.message);
         return;
       }
+
+      setSavedAttributesToast(true);
+      setTimeout(() => setSavedAttributesToast(false), 2000);
     } finally {
       setSavingAttributes(false);
     }
@@ -881,7 +901,7 @@ export default function DashboardPage() {
             <img
               src={filteredScreenshots[selectedIndex!].image_url}
               alt=""
-              className="max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg"
+              className="max-h-[90vh] max-w-[90vw] origin-center animate-[fadeIn_0.2s_ease-out] rounded-md object-contain shadow-lg"
             />
           </div>
 
@@ -901,63 +921,64 @@ export default function DashboardPage() {
       {mounted &&
         selectedImage &&
         createPortal(
-          <div
-            className="fixed inset-0 z-[2147483647] overflow-hidden bg-black/70 backdrop-blur-sm transition-opacity duration-200 group opacity-100"
-            style={{
-              transform: "none",
-              pointerEvents: "auto",
-            }}
-          >
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/60 backdrop-blur-sm group">
             {/* Dismiss layer (behind sheet) */}
             <div
               className="absolute inset-0 z-0 cursor-pointer"
               onClick={() => setSelectedIndex(null)}
             />
 
-            <div className="absolute inset-0 z-10 flex min-h-0 min-w-0 overflow-hidden bg-white shadow-xl">
+            <div className="animate-[fadeIn_0.2s_ease-out] absolute inset-0 z-10 flex min-h-0 min-w-0 overflow-hidden bg-white shadow-xl">
               {/* LEFT: IMAGE */}
               <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
                 <div className="flex h-full min-h-0 w-full items-center justify-center p-2">
                   <img
                     src={filteredScreenshots[selectedIndex!].image_url}
                     alt=""
-                    className="max-h-full max-w-full w-auto cursor-default object-contain"
+                    className="max-h-full max-w-full w-auto cursor-default animate-[fadeIn_0.2s_ease-out] rounded-md object-contain shadow-lg"
                     onClick={(e) => e.stopPropagation()}
                   />
                 </div>
               </div>
 
               {/* RIGHT: PANEL — only this column scrolls when content is tall */}
-              <div className="box-border flex h-full min-h-0 w-[320px] shrink-0 flex-col overflow-y-auto overflow-x-hidden border-l border-gray-200 p-4">
-                {/* NOTES */}
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Notes</p>
-                  <textarea
-                    value={currentNote}
-                    onChange={(e) => setCurrentNote(e.target.value)}
-                    placeholder="Write your trade thoughts..."
-                    className="mt-2 w-full h-24 rounded-lg border border-gray-300 p-2 text-sm text-gray-900"
-                  />
+              <div className="box-border flex h-full min-h-0 w-[380px] shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-gray-50 p-4">
+                <div className="flex flex-col space-y-6">
+                  {/* NOTES */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Notes
+                    </p>
+                    <textarea
+                      value={currentNote}
+                      onChange={(e) => setCurrentNote(e.target.value)}
+                      placeholder="Write your trade thoughts..."
+                      className="mt-2 w-full h-24 rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900"
+                    />
 
-                  <button
-                    type="button"
-                    onClick={handleSaveNote}
-                    disabled={savingNote}
-                    className="mt-2 w-full rounded-lg bg-gray-900 py-2 text-sm text-white hover:bg-gray-800 transition"
-                  >
-                    {savingNote ? "Saving note..." : "Save note"}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveNote}
+                      disabled={savingNote}
+                      className="mt-2 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
+                    >
+                      {savingNote ? "Saving note..." : "Save note"}
+                    </button>
 
-                  {savedNoteToast && (
-                    <div className="mt-2 text-xs text-green-200">Saved ✓</div>
-                  )}
-                </div>
+                    {savedNoteToast && (
+                      <div className="mt-2 text-xs font-medium text-green-700">
+                        Saved ✓
+                      </div>
+                    )}
+                  </div>
 
-                {/* ATTRIBUTES */}
-                <div className="mt-6">
-                  <p className="text-sm font-semibold text-gray-900">Attributes</p>
+                  {/* ATTRIBUTES */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Attributes
+                    </p>
 
-                  <div className="mt-2 space-y-2">
+                    <div className="mt-2 space-y-2">
                     {attributes.map((attr, index) => (
                       <div key={attr.id ?? index} className="flex gap-2">
                         <input
@@ -1005,10 +1026,17 @@ export default function DashboardPage() {
                       await handleSaveAttributes();
                     }}
                     disabled={savingAttributes}
-                    className="mt-3 w-full rounded-lg bg-gray-900 py-2 text-sm text-white hover:bg-gray-800 transition"
+                    className="mt-3 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
                   >
                     {savingAttributes ? "Saving attributes..." : "Save attributes"}
                   </button>
+
+                  {savedAttributesToast && (
+                    <div className="mt-2 text-xs font-medium text-green-700">
+                      Saved ✓
+                    </div>
+                  )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1020,7 +1048,7 @@ export default function DashboardPage() {
               aria-label="Close modal"
               className="fixed top-4 z-[2147483646] flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-xl text-white shadow-lg ring-2 ring-white/30 transition hover:bg-zinc-800"
               style={{
-                right: "clamp(1rem, calc(320px + 1rem), calc(100vw - 3rem))",
+                right: "clamp(1rem, calc(380px + 1rem), calc(100vw - 3rem))",
               }}
             >
               ×
@@ -1067,7 +1095,7 @@ export default function DashboardPage() {
                     group-hover:opacity-100
                   "
                   style={{
-                    right: "clamp(1rem, calc(320px + 1rem), calc(100vw - 3rem))",
+                    right: "clamp(1rem, calc(380px + 1rem), calc(100vw - 3rem))",
                   }}
                 >
                   →
