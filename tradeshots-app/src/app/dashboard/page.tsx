@@ -276,51 +276,102 @@ export default function DashboardPage() {
 
       {selectedImage && (
         <div
-          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 transition-opacity duration-200 ease-out ${
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-200 relative group ${
             modalEntered ? "opacity-100" : "opacity-0"
           }`}
           onClick={() => setSelectedIndex(null)}
         >
+          {selectedIndex !== null && selectedIndex > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedIndex((prev) =>
+                  prev !== null && prev > 0 ? prev - 1 : prev
+                );
+              }}
+              className="
+                absolute left-4 top-1/2 -translate-y-1/2
+                z-50
+                text-white text-3xl
+                bg-black/40
+                w-12 h-12
+                rounded-full
+                flex items-center justify-center
+                cursor-pointer
+                transition-all duration-200
+                opacity-0 group-hover:opacity-100
+                hover:bg-black/60
+              "
+            >
+              ←
+            </button>
+          )}
+
+          {selectedIndex !== null &&
+            selectedIndex < filteredScreenshots.length - 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedIndex((prev) =>
+                    prev !== null && prev < filteredScreenshots.length - 1
+                      ? prev + 1
+                      : prev
+                  );
+                }}
+                className="
+                  absolute right-4 top-1/2 -translate-y-1/2
+                  z-50
+                  text-white text-3xl
+                  bg-black/40
+                  w-12 h-12
+                  rounded-full
+                  flex items-center justify-center
+                  cursor-pointer
+                  transition-all duration-200
+                  opacity-0 group-hover:opacity-100
+                  hover:bg-black/60
+                "
+              >
+                →
+              </button>
+            )}
           <button
             type="button"
-            aria-label="Previous screenshot"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelectedIndex((prev) =>
-                prev !== null && prev > 0 ? prev - 1 : prev
-              );
-            }}
-            className="absolute left-4 top-1/2 z-10 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0 text-3xl leading-none text-white"
+            onClick={() => setSelectedIndex(null)}
+            aria-label="Close modal"
+            className="
+              absolute top-4 right-4
+              text-white text-xl
+              bg-black/50 hover:bg-black/70
+              rounded-full w-10 h-10
+              flex items-center justify-center
+              transition
+            "
           >
-            ←
+            ×
           </button>
-          <button
-            type="button"
-            aria-label="Next screenshot"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelectedIndex((prev) =>
-                prev !== null && prev < filteredScreenshots.length - 1
-                  ? prev + 1
-                  : prev
-              );
-            }}
-            className="absolute right-4 top-1/2 z-10 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0 text-3xl leading-none text-white"
-          >
-            →
-          </button>
-          <img
-            src={selectedImage.image_url}
-            alt="Selected screenshot"
+          <div
+            className="transform transition-all duration-200 scale-95 opacity-0"
+            style={{ animation: "fadeIn 0.2s ease-out forwards" }}
             onClick={(e) => e.stopPropagation()}
-            className={`max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg transition-[opacity,transform] duration-200 ease-out ${
-              modalEntered ? "scale-100 opacity-100" : "scale-[0.98] opacity-0"
-            }`}
-          />
-          <p className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 text-sm text-white">
-            {selectedIndex !== null ? selectedIndex + 1 : 0} /{" "}
-            {filteredScreenshots.length}
-          </p>
+          >
+            <img
+              src={selectedImage.image_url}
+              alt="Selected screenshot"
+              className="max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg"
+            />
+          </div>
+          <div
+            className="
+              absolute bottom-4 left-1/2 -translate-x-1/2
+              text-white text-sm
+              bg-black/50 px-3 py-1 rounded-full
+            "
+          >
+            {selectedIndex! + 1} / {filteredScreenshots.length}
+          </div>
         </div>
       )}
     </>
