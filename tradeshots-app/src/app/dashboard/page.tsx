@@ -11,6 +11,7 @@ type ScreenshotRow = {
   image_url: string;
   created_at: string;
   tags?: string[] | null;
+  notes?: string | null;
 };
 
 export default function DashboardPage() {
@@ -21,8 +22,17 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [tagFilter, setTagFilter] = useState("");
+  const [attributeFilter, setAttributeFilter] = useState("");
+  const [attributeValuesByScreenshot, setAttributeValuesByScreenshot] = useState<
+    Record<string, string[]>
+  >({});
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
+  const [currentNote, setCurrentNote] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [savedNoteToast, setSavedNoteToast] = useState(false);
+  const [attributes, setAttributes] = useState<any[]>([]);
+  const [savingAttributes, setSavingAttributes] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -33,6 +43,7 @@ export default function DashboardPage() {
 
   const fetchScreenshots = async () => {
     setLoading(true);
+    setAttributeValuesByScreenshot({});
 
     const {
       data: { session },
@@ -47,16 +58,42 @@ export default function DashboardPage() {
 
     const { data, error: screenshotsError } = await supabase
       .from("screenshots")
-      .select("id, image_url, created_at, tags")
+      .select("id, image_url, created_at, tags, notes")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (screenshotsError) {
       setError(screenshotsError.message);
       setScreenshots([]);
+      setAttributeValuesByScreenshot({});
     } else {
       setError(null);
-      setScreenshots((data ?? []) as ScreenshotRow[]);
+      const screenshotRows = (data ?? []) as ScreenshotRow[];
+      setScreenshots(screenshotRows);
+
+      const screenshotIds = screenshotRows.map((s) => s.id);
+      if (screenshotIds.length > 0) {
+        const { data: attrData, error: attrError } = await supabase
+          .from("trade_attributes")
+          .select("screenshot_id,value")
+          .in("screenshot_id", screenshotIds);
+
+        if (!attrError && attrData) {
+          const map: Record<string, string[]> = {};
+          for (const row of attrData as any[]) {
+            const sid = row.screenshot_id;
+            const value = row.value;
+            if (!sid) continue;
+            if (!map[sid]) map[sid] = [];
+            if (value !== null && value !== undefined) {
+              map[sid].push(String(value));
+            }
+          }
+          setAttributeValuesByScreenshot(map);
+        } else {
+          setAttributeValuesByScreenshot({});
+        }
+      }
     }
 
     setLoading(false);
@@ -94,12 +131,22 @@ export default function DashboardPage() {
         return;
       }
 
-      const filteredScreenshots = screenshots.filter((s) => {
-        if (!tagFilter) return true;
+      const tagFilterLower = tagFilter.trim().toLowerCase();
+      const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
-        return s.tags?.some((tag) =>
-          tag.toLowerCase().includes(tagFilter.toLowerCase())
-        );
+      const filteredScreenshots = screenshots.filter((s) => {
+        const matchesTag =
+          !tagFilterLower ||
+          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+
+        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const matchesAttribute =
+          !attributeFilterLower ||
+          values.some((v) =>
+            v.toLowerCase().includes(attributeFilterLower)
+          );
+
+        return matchesTag && matchesAttribute;
       });
 
       if (selectedIndex === null) return;
@@ -121,7 +168,7 @@ export default function DashboardPage() {
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [screenshots, tagFilter, selectedIndex]);
+  }, [screenshots, tagFilter, attributeFilter, attributeValuesByScreenshot, selectedIndex]);
 
   useEffect(() => {
     if (selectedIndex === null) {
@@ -141,6 +188,77 @@ export default function DashboardPage() {
     };
   }, [selectedIndex]);
 
+  useEffect(() => {
+    if (selectedIndex === null) {
+      setCurrentNote("");
+      return;
+    }
+
+    const tagFilterLower = tagFilter.trim().toLowerCase();
+    const attributeFilterLower = attributeFilter.trim().toLowerCase();
+
+    const filtered = screenshots.filter((s) => {
+      const matchesTag =
+        !tagFilterLower ||
+        s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+
+      const values = attributeValuesByScreenshot[s.id] ?? [];
+      const matchesAttribute =
+        !attributeFilterLower ||
+        values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+
+      return matchesTag && matchesAttribute;
+    });
+
+    const shot = filtered[selectedIndex];
+    setCurrentNote(shot?.notes ?? "");
+  }, [selectedIndex, screenshots, tagFilter, attributeFilter, attributeValuesByScreenshot]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchAttributes() {
+      if (selectedIndex === null) {
+        if (!cancelled) setAttributes([]);
+        return;
+      }
+
+      const tagFilterLower = tagFilter.trim().toLowerCase();
+      const attributeFilterLower = attributeFilter.trim().toLowerCase();
+
+      const filtered = screenshots.filter((s) => {
+        const matchesTag =
+          !tagFilterLower ||
+          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+
+        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const matchesAttribute =
+          !attributeFilterLower ||
+          values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+
+        return matchesTag && matchesAttribute;
+      });
+
+      const screenshot = filtered[selectedIndex];
+      if (!screenshot) {
+        if (!cancelled) setAttributes([]);
+        return;
+      }
+
+      const { data } = await supabase
+        .from("trade_attributes")
+        .select("*")
+        .eq("screenshot_id", screenshot.id);
+
+      if (!cancelled) setAttributes(data || []);
+    }
+
+    fetchAttributes();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedIndex, tagFilter, attributeFilter, attributeValuesByScreenshot]);
+
   async function handleLogout() {
     setSigningOut(true);
     setError(null);
@@ -153,6 +271,130 @@ export default function DashboardPage() {
       router.replace("/login");
     } finally {
       setSigningOut(false);
+    }
+  }
+
+  async function handleSaveNote() {
+    if (selectedIndex === null) return;
+
+    setSavingNote(true);
+    setError(null);
+    try {
+      const tagFilterLower = tagFilter.trim().toLowerCase();
+      const attributeFilterLower = attributeFilter.trim().toLowerCase();
+
+      const filtered = screenshots.filter((s) => {
+        const matchesTag =
+          !tagFilterLower ||
+          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+
+        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const matchesAttribute =
+          !attributeFilterLower ||
+          values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+
+        return matchesTag && matchesAttribute;
+      });
+
+      const shot = filtered[selectedIndex];
+      if (!shot) return;
+
+      const { error: saveError } = await supabase
+        .from("screenshots")
+        .update({ notes: currentNote })
+        .eq("id", shot.id);
+
+      if (saveError) {
+        setError(saveError.message);
+        return;
+      }
+
+      // Keep UI in sync for note navigation.
+      setScreenshots((prev) =>
+        prev.map((s) =>
+          s.id === shot.id
+            ? {
+                ...s,
+                notes: currentNote,
+              }
+            : s
+        )
+      );
+
+      setSavedNoteToast(true);
+      setTimeout(() => setSavedNoteToast(false), 2000);
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
+  async function handleSaveAttributes() {
+    if (selectedIndex === null) return;
+
+    setSavingAttributes(true);
+    setError(null);
+
+    try {
+      const tagFilterLower = tagFilter.trim().toLowerCase();
+      const attributeFilterLower = attributeFilter.trim().toLowerCase();
+
+      const filtered = screenshots.filter((s) => {
+        const matchesTag =
+          !tagFilterLower ||
+          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+
+        const values = attributeValuesByScreenshot[s.id] ?? [];
+        const matchesAttribute =
+          !attributeFilterLower ||
+          values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+
+        return matchesTag && matchesAttribute;
+      });
+
+      const screenshot = filtered[selectedIndex];
+      if (!screenshot) return;
+
+      // delete old attributes
+      const { error: deleteError } = await supabase
+        .from("trade_attributes")
+        .delete()
+        .eq("screenshot_id", screenshot.id);
+
+      if (deleteError) {
+        setError(deleteError.message);
+        return;
+      }
+
+      // insert new ones
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+
+      if (userError || !userData.user) {
+        setError(userError?.message ?? "User not found.");
+        return;
+      }
+
+      const rows = attributes
+        .map((attr) => ({
+          screenshot_id: screenshot.id,
+          user_id: userData.user.id,
+          key: (attr?.key ?? "").toString(),
+          value: (attr?.value ?? "").toString(),
+        }))
+        .filter((r) => r.key.trim().length > 0);
+
+      if (rows.length === 0) return;
+
+      const { error: insertError } = await supabase
+        .from("trade_attributes")
+        .insert(rows);
+
+      if (insertError) {
+        setError(insertError.message);
+        return;
+      }
+    } finally {
+      setSavingAttributes(false);
     }
   }
 
@@ -174,12 +416,20 @@ export default function DashboardPage() {
     );
   }
 
-  const filteredScreenshots = screenshots.filter((s) => {
-    if (!tagFilter) return true;
+  const tagFilterLower = tagFilter.trim().toLowerCase();
+  const attributeFilterLower = attributeFilter.trim().toLowerCase();
 
-    return s.tags?.some((tag) =>
-      tag.toLowerCase().includes(tagFilter.toLowerCase())
-    );
+  const filteredScreenshots = screenshots.filter((s) => {
+    const matchesTag =
+      !tagFilterLower ||
+      s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+
+    const values = attributeValuesByScreenshot[s.id] ?? [];
+    const matchesAttribute =
+      !attributeFilterLower ||
+      values.some((v) => v.toLowerCase().includes(attributeFilterLower));
+
+    return matchesTag && matchesAttribute;
   });
 
   const selectedImage =
@@ -235,6 +485,13 @@ export default function DashboardPage() {
                   value={tagFilter}
                   onChange={(e) => setTagFilter(e.target.value)}
                   placeholder="Filter by tag..."
+                  className="mb-6 w-full max-w-sm rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
+                />
+                <input
+                  type="text"
+                  value={attributeFilter}
+                  onChange={(e) => setAttributeFilter(e.target.value)}
+                  placeholder="Filter by attribute (e.g. Long)"
                   className="mb-6 w-full max-w-sm rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
                 />
                 {filteredScreenshots.length === 0 ? (
@@ -515,16 +772,95 @@ export default function DashboardPage() {
             </button>
 
             {/* Image */}
-            <div
-              className="relative z-[2147483645] transform transition-all duration-200 scale-95 opacity-0"
-              style={{ animation: "fadeIn 0.2s ease-out forwards" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={filteredScreenshots[selectedIndex!].image_url}
-                alt=""
-                className="max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg"
-              />
+            <div className="flex flex-col items-center">
+              <div
+                className="relative z-[2147483645] transform transition-all duration-200 scale-95 opacity-0"
+                style={{ animation: "fadeIn 0.2s ease-out forwards" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <img
+                  src={filteredScreenshots[selectedIndex!].image_url}
+                  alt=""
+                  className="max-h-[90vh] max-w-[90vw] origin-center rounded-lg shadow-lg"
+                />
+              </div>
+
+              <div className="relative z-10 mt-4 w-full max-w-xl">
+                <textarea
+                  value={currentNote}
+                  onChange={(e) => setCurrentNote(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-900"
+                  placeholder="Add notes about this trade..."
+                />
+
+                <button
+                  type="button"
+                  onClick={handleSaveNote}
+                  disabled={savingNote}
+                  className="mt-2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800 transition"
+                >
+                  {savingNote ? "Saving note..." : "Save note"}
+                </button>
+
+                {savedNoteToast && (
+                  <div className="mt-2 text-xs text-green-200">
+                    Saved ✓
+                  </div>
+                )}
+              </div>
+
+              <div className="relative z-10 mt-4 w-full max-w-xl space-y-2">
+                {attributes.map((attr, index) => (
+                  <div key={attr.id ?? index} className="flex gap-2">
+                    <input
+                      value={attr.key || ""}
+                      onChange={(e) => {
+                        const updated = [...attributes];
+                        updated[index].key = e.target.value;
+                        setAttributes(updated);
+                      }}
+                      placeholder="Field (e.g. Direction)"
+                      className="w-1/2 rounded-lg border px-2 py-1 text-sm"
+                    />
+
+                    <input
+                      value={attr.value || ""}
+                      onChange={(e) => {
+                        const updated = [...attributes];
+                        updated[index].value = e.target.value;
+                        setAttributes(updated);
+                      }}
+                      placeholder="Value (e.g. Long)"
+                      className="w-1/2 rounded-lg border px-2 py-1 text-sm"
+                    />
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAttributes([
+                      ...attributes,
+                      { id: `tmp-${Date.now()}-${Math.random()}`, key: "", value: "" },
+                    ])
+                  }
+                  className="text-sm text-blue-600"
+                >
+                  + Add field
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await handleSaveAttributes();
+                  }}
+                  disabled={savingAttributes}
+                  className="mt-2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800 transition"
+                >
+                  {savingAttributes ? "Saving attributes..." : "Save attributes"}
+                </button>
+              </div>
             </div>
 
             {/* Counter */}
