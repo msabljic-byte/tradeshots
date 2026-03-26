@@ -417,14 +417,37 @@ export default function DashboardPage() {
         setIsCommandOpen((prev) => !prev);
       }
 
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+
+        const tagFilterLower = tagFilter.trim().toLowerCase();
+        const visible = screenshots.filter((s) => {
+          const matchesTag =
+            !tagFilterLower ||
+            s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+
+          if (filters.length === 0) return matchesTag;
+
+          const keyMap = attributeKeyValuesByScreenshot[s.id] ?? {};
+          const matchesAttributes = filters.every((filter) =>
+            (keyMap[filter.key] ?? []).includes(filter.value)
+          );
+
+          return matchesTag && matchesAttributes;
+        });
+
+        setSelectedIds(visible.map((s) => s.id));
+      }
+
       if (e.key === "Escape") {
+        setSelectedIds([]);
         setIsCommandOpen(false);
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [screenshots, tagFilter, filters, attributeKeyValuesByScreenshot]);
 
   useEffect(() => {
     if (selectedIndex === null) return;
@@ -1771,6 +1794,10 @@ export default function DashboardPage() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
           <div className="flex items-center gap-4 rounded-xl bg-gray-900 text-white px-6 py-3 shadow-lg">
             <span className="text-sm">{selectedIds.length} selected</span>
+            {selectedIds.length === filteredScreenshots.length &&
+              filteredScreenshots.length > 0 && (
+                <span className="text-xs text-gray-300">(All)</span>
+              )}
 
             <button
               type="button"
