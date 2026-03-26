@@ -94,6 +94,8 @@ export default function DashboardPage() {
   const [savedViews, setSavedViews] = useState<any[]>([]);
   const [viewName, setViewName] = useState("");
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<any[]>([]);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
 
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -155,11 +157,18 @@ export default function DashboardPage() {
       return;
     }
 
-    const { data, error: screenshotsError } = await supabase
+    let query = supabase
       .from("screenshots")
       .select("id, image_url, created_at, tags, notes")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+      .eq("user_id", user.id);
+
+    if (activeFolderId) {
+      query = query.eq("folder_id", activeFolderId);
+    }
+
+    const { data, error: screenshotsError } = await query.order("created_at", {
+      ascending: false,
+    });
 
     if (screenshotsError) {
       setError(screenshotsError.message);
@@ -216,6 +225,35 @@ export default function DashboardPage() {
       .eq("user_id", user.id);
 
     setSavedViews(data || []);
+  }
+
+  async function fetchFolders() {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) {
+      setFolders([]);
+      return;
+    }
+
+    const { data } = await supabase
+      .from("folders")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true });
+
+    setFolders(data || []);
+  }
+
+  async function createFolder(name: string, parentId: string | null = null) {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) return;
+
+    await supabase.from("folders").insert({
+      name,
+      parent_id: parentId,
+      user_id: user.id,
+    });
+
+    await fetchFolders();
   }
 
   async function handleSaveView() {
@@ -322,7 +360,16 @@ export default function DashboardPage() {
   }, [router, fetchAllAttributes]);
 
   useEffect(() => {
+    if (checkingSession) return;
+    fetchScreenshots();
+  }, [activeFolderId]);
+
+  useEffect(() => {
     fetchSavedViews();
+  }, []);
+
+  useEffect(() => {
+    fetchFolders();
   }, []);
 
   useEffect(() => {
@@ -1077,10 +1124,50 @@ export default function DashboardPage() {
       <div className="flex w-64 flex-col border-r border-gray-200 bg-white p-4">
         <h1 className="mb-6 text-lg font-semibold text-gray-900">TradeShots</h1>
 
+        <button
+          type="button"
+          onClick={() => {
+            const name = prompt("Folder name");
+            if (name) {
+              void createFolder(name);
+            }
+          }}
+          className="mb-4 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50"
+        >
+          + New Folder
+        </button>
+
         <div className="space-y-1">
-          <button className="w-full rounded-lg bg-gray-900 px-3 py-2 text-left text-sm text-white">
+          <button
+            type="button"
+            onClick={() => setActiveFolderId(null)}
+            className={`
+              w-full rounded-lg px-3 py-2 text-left text-sm
+              ${activeFolderId === null
+                ? "bg-gray-900 text-white"
+                : "text-gray-700 hover:bg-gray-100"
+              }
+            `}
+          >
             All Screenshots
           </button>
+
+          {folders.map((folder) => (
+            <button
+              key={folder.id}
+              type="button"
+              onClick={() => setActiveFolderId(folder.id)}
+              className={`
+                w-full rounded-lg px-3 py-2 text-left text-sm
+                ${activeFolderId === folder.id
+                  ? "bg-gray-900 text-white"
+                  : "text-gray-700 hover:bg-gray-100"
+                }
+              `}
+            >
+              📁 {folder.name}
+            </button>
+          ))}
         </div>
       </div>
 
