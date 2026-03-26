@@ -99,6 +99,7 @@ export default function DashboardPage() {
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [folders, setFolders] = useState<any[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   const [currentNote, setCurrentNote] = useState("");
@@ -256,6 +257,35 @@ export default function DashboardPage() {
       parent_id: parentId,
       user_id: user.id,
     });
+
+    await fetchFolders();
+  }
+
+  async function renameFolder(folderId: string, currentName: string) {
+    const newName = prompt("Rename folder", currentName);
+    if (!newName || newName === currentName) return;
+
+    await supabase
+      .from("folders")
+      .update({ name: newName })
+      .eq("id", folderId);
+
+    await fetchFolders();
+  }
+
+  async function deleteFolder(folderId: string | null) {
+    if (!folderId) return;
+
+    await supabase
+      .from("folders")
+      .delete()
+      .eq("id", folderId);
+
+    setFolderToDelete(null);
+
+    if (activeFolderId === folderId) {
+      setActiveFolderId(null);
+    }
 
     await fetchFolders();
   }
@@ -1278,6 +1308,34 @@ export default function DashboardPage() {
               >
                 📁 {folder.name}
               </span>
+
+              <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void renameFolder(folder.id, folder.name);
+                  }}
+                  className={`text-sm ${
+                    isActive ? "text-white/80 hover:text-white" : "text-gray-400 hover:text-gray-700"
+                  }`}
+                >
+                  ✏️
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFolderToDelete(folder.id);
+                  }}
+                  className={`text-sm ${
+                    isActive ? "text-white/80 hover:text-red-200" : "text-gray-400 hover:text-red-600"
+                  }`}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {isExpanded && renderFolders(folder.id, level + 1)}
@@ -1854,6 +1912,32 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={() => void handleBulkDelete()}
+                className="rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {folderToDelete && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+            <p className="mb-4 text-sm text-gray-900">Delete this folder?</p>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setFolderToDelete(null)}
+                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void deleteFolder(folderToDelete)}
                 className="rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700"
               >
                 Delete
