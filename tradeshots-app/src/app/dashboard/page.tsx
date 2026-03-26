@@ -65,6 +65,7 @@ export default function DashboardPage() {
   const [signingOut, setSigningOut] = useState(false);
   const [loading, setLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
+  const [allScreenshots, setAllScreenshots] = useState<any[]>([]);
   const [tagFilter, setTagFilter] = useState("");
   const [allAttributes, setAllAttributes] = useState<any[]>([]);
   const [attributeKeyValuesByScreenshot, setAttributeKeyValuesByScreenshot] = useState<
@@ -159,30 +160,32 @@ export default function DashboardPage() {
 
     if (!user) {
       setScreenshots([]);
+      setAllScreenshots([]);
       setLoading(false);
       return;
     }
 
-    let query = supabase
+    const { data, error: screenshotsError } = await supabase
       .from("screenshots")
-      .select("id, image_url, created_at, tags, notes")
-      .eq("user_id", user.id);
-
-    if (activeFolderId) {
-      query = query.eq("folder_id", activeFolderId);
-    }
-
-    const { data, error: screenshotsError } = await query.order("created_at", {
+      .select("id, image_url, created_at, tags, notes, folder_id")
+      .eq("user_id", user.id)
+      .order("created_at", {
       ascending: false,
     });
 
     if (screenshotsError) {
       setError(screenshotsError.message);
       setScreenshots([]);
+      setAllScreenshots([]);
       setAttributeKeyValuesByScreenshot({});
     } else {
       setError(null);
-      const screenshotRows = (data ?? []) as ScreenshotRow[];
+      const allRows = (data ?? []) as any[];
+      setAllScreenshots(allRows);
+
+      const screenshotRows = (activeFolderId
+        ? allRows.filter((s) => s.folder_id === activeFolderId)
+        : allRows) as ScreenshotRow[];
       setScreenshots(screenshotRows);
 
       const screenshotIds = screenshotRows.map((s) => s.id);
@@ -302,6 +305,10 @@ export default function DashboardPage() {
 
   function hasChildren(folderId: string) {
     return folders.some((f: any) => f.parent_id === folderId);
+  }
+
+  function getFolderCount(folderId: string) {
+    return allScreenshots.filter((s: any) => s.folder_id === folderId).length;
   }
 
   async function handleSaveView() {
@@ -1319,9 +1326,17 @@ export default function DashboardPage() {
 
               <span
                 onClick={() => setActiveFolderId(folder.id)}
-                className="flex-1 truncate text-sm"
+                className="truncate text-sm"
               >
                 📁 {folder.name}
+              </span>
+
+              <span
+                className={`ml-auto text-xs ${
+                  isActive ? "text-white/70" : "text-gray-400"
+                }`}
+              >
+                {getFolderCount(folder.id)}
               </span>
 
               <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
@@ -1666,6 +1681,14 @@ export default function DashboardPage() {
                     + Add Filter
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(filteredScreenshots.map((s) => s.id))}
+                    className="text-sm text-gray-600 hover:text-gray-900"
+                  >
+                    Select All
+                  </button>
+
                   {filters.map((f, index) => (
                     <div
                       key={`${f.key}-${f.value}-${index}`}
@@ -1747,12 +1770,10 @@ export default function DashboardPage() {
               </div>
 
               {filteredScreenshots.length === 0 ? (
-                <div className="py-12">
-                  <p className="text-lg font-semibold text-gray-900">
-                    No matching screenshots
-                  </p>
-                  <p className="mt-2 text-sm text-gray-600">
-                    Try adjusting tags or filters
+                <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500">
+                  <p className="mb-2 text-sm">No screenshots</p>
+                  <p className="text-xs text-gray-400">
+                    Upload or drag screenshots to get started
                   </p>
                 </div>
               ) : (
