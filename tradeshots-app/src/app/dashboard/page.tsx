@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
@@ -13,6 +13,50 @@ type ScreenshotRow = {
   tags?: string[] | null;
   notes?: string | null;
 };
+
+/** Normalize rows from Supabase (column names vary by schema / PostgREST) */
+function parseTradeAttributeRow(
+  row: Record<string, unknown>
+): { key: string; value: string } | null {
+  const rawKey =
+    row.key ??
+    row["key"] ??
+    row.attr_key ??
+    row.attribute_key ??
+    row.field ??
+    row.name;
+  const rawValue =
+    row.value ??
+    row["value"] ??
+    row.attr_value ??
+    row.attribute_value ??
+    row.val;
+  if (rawKey == null || rawValue == null) return null;
+  const key = String(rawKey).trim().toLowerCase();
+  const value = String(rawValue).trim().toLowerCase();
+  if (!key || !value) return null;
+  return { key, value };
+}
+
+function buildAttributeMapFromRows(
+  rows: Record<string, unknown>[]
+): Record<string, Record<string, string[]>> {
+  const map: Record<string, Record<string, string[]>> = {};
+  for (const row of rows) {
+    const sid =
+      row.screenshot_id != null ? String(row.screenshot_id) : "";
+    if (!sid) continue;
+    const parsed = parseTradeAttributeRow(row);
+    if (!parsed) continue;
+    if (!map[sid]) map[sid] = {};
+    const { key: keyLower, value: valueLower } = parsed;
+    if (!map[sid][keyLower]) map[sid][keyLower] = [];
+    if (!map[sid][keyLower].includes(valueLower)) {
+      map[sid][keyLower].push(valueLower);
+    }
+  }
+  return map;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -33,14 +77,20 @@ export default function DashboardPage() {
     }>
   >([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
+  const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [savedNoteToast, setSavedNoteToast] = useState(false);
   const [attributes, setAttributes] = useState<any[]>([]);
+  const [undoData, setUndoData] = useState<{
+    attribute: any;
+    index: number;
+  } | null>(null);
   const [savingAttributes, setSavingAttributes] = useState(false);
   const [savedAttributesToast, setSavedAttributesToast] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
@@ -107,28 +157,16 @@ export default function DashboardPage() {
       if (screenshotIds.length > 0) {
         const { data: attrData, error: attrError } = await supabase
           .from("trade_attributes")
-          .select("screenshot_id,key,value")
+          .select("*")
           .in("screenshot_id", screenshotIds);
 
-        if (!attrError && attrData) {
-          const map: Record<string, Record<string, string[]>> = {};
-          for (const row of attrData as any[]) {
-            const sid = row.screenshot_id;
-            const key = row.key;
-            const value = row.value;
-            if (!sid) continue;
-            if (!map[sid]) map[sid] = {};
-            if (key !== null && key !== undefined && value !== null && value !== undefined) {
-              const keyLower = String(key).trim().toLowerCase();
-              const valueLower = String(value).trim().toLowerCase();
-              if (!keyLower || !valueLower) continue;
-              if (!map[sid][keyLower]) map[sid][keyLower] = [];
-              if (!map[sid][keyLower].includes(valueLower)) {
-                map[sid][keyLower].push(valueLower);
-              }
-            }
-          }
-          setAttributeKeyValuesByScreenshot(map);
+        if (attrError) {
+          console.warn("trade_attributes (by screenshot):", attrError.message);
+          setAttributeKeyValuesByScreenshot({});
+        } else if (attrData) {
+          setAttributeKeyValuesByScreenshot(
+            buildAttributeMapFromRows(attrData as Record<string, unknown>[])
+          );
         } else {
           setAttributeKeyValuesByScreenshot({});
         }
@@ -137,6 +175,55 @@ export default function DashboardPage() {
 
     setLoading(false);
   };
+
+  const fetchAllAttributes = useCallback(async () => {
+    const { data, error } = await supabase.from("trade_attributes").select("*");
+    if (error) {
+      console.warn("fetchAllAttributes:", error.message);
+      setAllAttributes([]);
+      return;
+    }
+    setAllAttributes(data ?? []);
+  }, []);
+
+  /** Rebuild per-screenshot attribute map from DB (same source as grid filters + autocomplete) */
+  const refreshTradeAttributesIndex = useCallback(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) return;
+
+    const { data: shotRows, error: shotsErr } = await supabase
+      .from("screenshots")
+      .select("id")
+      .eq("user_id", user.id);
+
+    if (shotsErr) {
+      console.warn("refreshTradeAttributesIndex (screenshots):", shotsErr.message);
+      return;
+    }
+
+    const ids = (shotRows ?? []).map((s) => s.id);
+    if (ids.length === 0) {
+      setAttributeKeyValuesByScreenshot({});
+      return;
+    }
+
+    const { data: attrData, error: attrErr } = await supabase
+      .from("trade_attributes")
+      .select("*")
+      .in("screenshot_id", ids);
+
+    if (attrErr) {
+      console.warn("refreshTradeAttributesIndex:", attrErr.message);
+      return;
+    }
+
+    setAttributeKeyValuesByScreenshot(
+      buildAttributeMapFromRows((attrData ?? []) as Record<string, unknown>[])
+    );
+  }, []);
 
   useEffect(() => {
     async function loadDashboardData() {
@@ -152,15 +239,28 @@ export default function DashboardPage() {
 
       setEmail(user.email ?? null);
       await fetchScreenshots();
+      await fetchAllAttributes();
     }
 
     loadDashboardData().finally(() => {
       setCheckingSession(false);
     });
-  }, [router]);
+  }, [router, fetchAllAttributes]);
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Element | null;
+      if (!target?.closest(".profile-menu")) {
+        setIsProfileOpen(false);
+      }
+    }
+
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
   useEffect(() => {
@@ -178,13 +278,8 @@ export default function DashboardPage() {
   }, [selectedIndex]);
 
   useEffect(() => {
-    async function fetchAllAttributes() {
-      const { data } = await supabase.from("trade_attributes").select("key,value");
-      setAllAttributes(data || []);
-    }
-
     fetchAllAttributes();
-  }, []);
+  }, [fetchAllAttributes]);
 
   // Group attributes per screenshot to enable scalable multi-filter logic.
   const attributesByScreenshot = useMemo(() => {
@@ -208,31 +303,95 @@ export default function DashboardPage() {
     return result;
   }, [attributeKeyValuesByScreenshot]);
 
+  /** Pairs from loaded screenshots — stays in sync with fetchScreenshots / local patches */
+  const attributePairsFromScreenshots = useMemo(() => {
+    const pairs: Array<{ key: string; value: string }> = [];
+    const seen = new Set<string>();
+    for (const keyMap of Object.values(attributeKeyValuesByScreenshot)) {
+      for (const [key, values] of Object.entries(keyMap ?? {})) {
+        for (const value of values ?? []) {
+          const k = String(key).trim().toLowerCase();
+          const v = String(value).trim().toLowerCase();
+          if (!k || !v) continue;
+          const sig = `${k}\0${v}`;
+          if (seen.has(sig)) continue;
+          seen.add(sig);
+          pairs.push({ key: k, value: v });
+        }
+      }
+    }
+    return pairs;
+  }, [attributeKeyValuesByScreenshot]);
+
+  /** Merged DB + screenshot map so filter autocomplete works even if one source lags */
   const allAttributesNormalized = useMemo(() => {
-    return (allAttributes ?? [])
-      .map((a: any) => ({
-        key: String(a?.key ?? "").trim().toLowerCase(),
-        value: String(a?.value ?? "").trim().toLowerCase(),
-      }))
-      .filter((a) => a.key.length > 0 && a.value.length >0);
-  }, [allAttributes]);
+    const fromDb = (allAttributes ?? [])
+      .map((row: any) =>
+        parseTradeAttributeRow(row as Record<string, unknown>)
+      )
+      .filter((x): x is { key: string; value: string } => x !== null);
 
+    const seen = new Set<string>();
+    const merged: Array<{ key: string; value: string }> = [];
+    const push = (a: { key: string; value: string }) => {
+      const sig = `${a.key}\0${a.value}`;
+      if (seen.has(sig)) return;
+      seen.add(sig);
+      merged.push(a);
+    };
+    for (const a of attributePairsFromScreenshots) push(a);
+    for (const a of fromDb) push(a);
+    return merged;
+  }, [allAttributes, attributePairsFromScreenshots]);
+
+  /** Keys from merged pairs plus any key present in per-screenshot maps */
   const uniqueKeys = useMemo(() => {
-    return [
-      ...new Set(allAttributesNormalized.map((a) => a.key).filter(Boolean)),
-    ];
-  }, [allAttributesNormalized]);
+    const keys = new Set<string>();
+    for (const a of allAttributesNormalized) {
+      if (a.key) keys.add(a.key);
+    }
+    for (const keyMap of Object.values(attributeKeyValuesByScreenshot)) {
+      for (const k of Object.keys(keyMap ?? {})) {
+        const kl = k.trim().toLowerCase();
+        if (kl) keys.add(kl);
+      }
+    }
+    return Array.from(keys).sort((a, b) => a.localeCompare(b));
+  }, [allAttributesNormalized, attributeKeyValuesByScreenshot]);
 
+  /** Values for selected attribute key — read maps first, then merged pairs */
   const valuesForKey = useMemo(() => {
-    return [
-      ...new Set(
-        allAttributesNormalized
-          .filter((a) => a.key === selectedKey)
-          .map((a) => a.value)
-          .filter(Boolean)
-      ),
-    ];
-  }, [allAttributesNormalized, selectedKey]);
+    if (!selectedKey) return [];
+    const values = new Set<string>();
+    for (const keyMap of Object.values(attributeKeyValuesByScreenshot)) {
+      const list = keyMap[selectedKey];
+      if (list) {
+        for (const v of list) {
+          if (v) values.add(v);
+        }
+      }
+    }
+    for (const a of allAttributesNormalized) {
+      if (a.key === selectedKey && a.value) values.add(a.value);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [selectedKey, attributeKeyValuesByScreenshot, allAttributesNormalized]);
+
+  /** All distinct values (for modal Field/Value datalists) */
+  const allUniqueAttributeValues = useMemo(() => {
+    const values = new Set<string>();
+    for (const a of allAttributesNormalized) {
+      if (a.value) values.add(a.value);
+    }
+    for (const keyMap of Object.values(attributeKeyValuesByScreenshot)) {
+      for (const list of Object.values(keyMap ?? {})) {
+        for (const v of list ?? []) {
+          if (v) values.add(v);
+        }
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [allAttributesNormalized, attributeKeyValuesByScreenshot]);
 
   const filteredKeys = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -304,8 +463,6 @@ export default function DashboardPage() {
   ]);
 
   useEffect(() => {
-    if (selectedIndex === null) return;
-
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setSelectedIndex(null);
@@ -314,7 +471,7 @@ export default function DashboardPage() {
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [selectedIndex]);
+  }, []);
 
   useEffect(() => {
     if (selectedIndex === null) {
@@ -418,6 +575,12 @@ export default function DashboardPage() {
     attributesByScreenshot,
   ]);
 
+  useEffect(() => {
+    if (selectedIndex === null) {
+      setUndoData(null);
+    }
+  }, [selectedIndex]);
+
   async function handleLogout() {
     setSigningOut(true);
     setError(null);
@@ -488,11 +651,16 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleSaveAttributes() {
+  async function saveAttributes(
+    attrList: any[],
+    options?: { showToast?: boolean }
+  ) {
     if (selectedIndex === null) return;
 
     setSavingAttributes(true);
     setError(null);
+
+    const showToast = options?.showToast !== false;
 
     try {
       const tagFilterLower = tagFilter.trim().toLowerCase();
@@ -515,7 +683,6 @@ export default function DashboardPage() {
       const screenshot = filtered[selectedIndex];
       if (!screenshot) return;
 
-      // delete old attributes
       const { error: deleteError } = await supabase
         .from("trade_attributes")
         .delete()
@@ -526,7 +693,6 @@ export default function DashboardPage() {
         return;
       }
 
-      // insert new ones
       const { data: userData, error: userError } =
         await supabase.auth.getUser();
 
@@ -535,7 +701,7 @@ export default function DashboardPage() {
         return;
       }
 
-      const rows = attributes
+      const rows = attrList
         .map((attr) => ({
           screenshot_id: screenshot.id,
           user_id: userData.user.id,
@@ -545,8 +711,12 @@ export default function DashboardPage() {
         .filter((r) => r.key.trim().length > 0);
 
       if (rows.length === 0) {
-        setSavedAttributesToast(true);
-        setTimeout(() => setSavedAttributesToast(false), 2000);
+        await fetchAllAttributes();
+        await refreshTradeAttributesIndex();
+        if (showToast) {
+          setSavedAttributesToast(true);
+          setTimeout(() => setSavedAttributesToast(false), 2000);
+        }
         return;
       }
 
@@ -559,11 +729,51 @@ export default function DashboardPage() {
         return;
       }
 
-      setSavedAttributesToast(true);
-      setTimeout(() => setSavedAttributesToast(false), 2000);
+      await fetchAllAttributes();
+      await refreshTradeAttributesIndex();
+      if (showToast) {
+        setSavedAttributesToast(true);
+        setTimeout(() => setSavedAttributesToast(false), 2000);
+      }
     } finally {
       setSavingAttributes(false);
     }
+  }
+
+  async function handleSaveAttributes() {
+    if (selectedIndex === null) return;
+    await saveAttributes(attributes);
+  }
+
+  async function handleDeleteAttribute(index: number) {
+    const removed = attributes[index];
+
+    const updated = attributes.filter((_, i) => i !== index);
+    setAttributes(updated);
+
+    setUndoData({
+      attribute: removed,
+      index,
+    });
+
+    await saveAttributes(updated);
+
+    setTimeout(() => {
+      setUndoData(null);
+    }, 5000);
+  }
+
+  async function handleUndo() {
+    if (!undoData) return;
+
+    const restored = [...attributes];
+    restored.splice(undoData.index, 0, undoData.attribute);
+
+    setAttributes(restored);
+
+    await saveAttributes(restored);
+
+    setUndoData(null);
   }
 
   if (checkingSession) {
@@ -607,22 +817,36 @@ export default function DashboardPage() {
 
   const selectedImage =
     selectedIndex !== null ? filteredScreenshots[selectedIndex] ?? null : null;
+  const panelWidth = isPanelOpen ? 380 : 48;
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-900">TradeShots</h1>
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-gray-600">{email ?? ""}</div>
+          <div className="profile-menu relative">
             <button
               type="button"
-              onClick={handleLogout}
-              disabled={signingOut}
-              className="text-sm font-medium text-gray-700 transition hover:text-gray-900 disabled:opacity-60"
+              onClick={() => setIsProfileOpen(!isProfileOpen)}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-gray-700 transition hover:bg-gray-300"
             >
-              {signingOut ? "Signing out…" : "Log out"}
+              👤
             </button>
+
+            {isProfileOpen && (
+              <div className="absolute right-0 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+                <p className="mb-2 text-sm text-gray-900">{email ?? ""}</p>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={signingOut}
+                  className="w-full rounded px-2 py-1 text-left text-sm text-red-600 transition hover:bg-gray-100 disabled:opacity-60"
+                >
+                  {signingOut ? "Signing out…" : "Log out"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -692,7 +916,7 @@ export default function DashboardPage() {
 
               {showFilterMenu && (
                 <div
-                  className="fixed inset-0 z-50 flex cursor-pointer items-start justify-center bg-black/40 pt-32"
+                  className="fixed inset-0 z-[200] flex cursor-pointer items-start justify-center bg-black/40 pt-32"
                   onClick={() => setShowFilterMenu(false)}
                 >
                   <div
@@ -942,102 +1166,151 @@ export default function DashboardPage() {
               </div>
 
               {/* RIGHT: PANEL — only this column scrolls when content is tall */}
-              <div className="box-border flex h-full min-h-0 w-[380px] shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-gray-50 p-4">
-                <div className="flex flex-col space-y-6">
-                  {/* NOTES */}
-                  <div>
+              <div
+                className={`box-border flex h-full min-h-0 ${isPanelOpen ? "w-[380px]" : "w-[48px]"} shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-gray-50 p-4 transition-all duration-300`}
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  {isPanelOpen && (
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Notes
+                      Details
                     </p>
-                    <textarea
-                      value={currentNote}
-                      onChange={(e) => setCurrentNote(e.target.value)}
-                      placeholder="Write your trade thoughts..."
-                      className="mt-2 w-full h-24 rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900"
-                    />
-
-                    <button
-                      type="button"
-                      onClick={handleSaveNote}
-                      disabled={savingNote}
-                      className="mt-2 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
-                    >
-                      {savingNote ? "Saving note..." : "Save note"}
-                    </button>
-
-                    {savedNoteToast && (
-                      <div className="mt-2 text-xs font-medium text-green-700">
-                        Saved ✓
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ATTRIBUTES */}
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Attributes
-                    </p>
-
-                    <div className="mt-2 space-y-2">
-                    {attributes.map((attr, index) => (
-                      <div key={attr.id ?? index} className="flex gap-2">
-                        <input
-                          value={attr.key || ""}
-                          onChange={(e) => {
-                            const updated = [...attributes];
-                            updated[index].key = e.target.value;
-                            setAttributes(updated);
-                          }}
-                          placeholder="Field"
-                          className="w-1/2 rounded-md border px-2 py-1 text-sm"
-                        />
-
-                        <input
-                          value={attr.value || ""}
-                          onChange={(e) => {
-                            const updated = [...attributes];
-                            updated[index].value = e.target.value;
-                            setAttributes(updated);
-                          }}
-                          placeholder="Value"
-                          className="w-1/2 rounded-md border px-2 py-1 text-sm"
-                        />
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAttributes([
-                        ...attributes,
-                        { id: `tmp-${Date.now()}-${Math.random()}`, key: "", value: "" },
-                      ])
-                    }
-                    className="mt-3 text-sm text-blue-600 hover:underline"
-                  >
-                    + Add field
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await handleSaveAttributes();
-                    }}
-                    disabled={savingAttributes}
-                    className="mt-3 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
-                  >
-                    {savingAttributes ? "Saving attributes..." : "Save attributes"}
-                  </button>
-
-                  {savedAttributesToast && (
-                    <div className="mt-2 text-xs font-medium text-green-700">
-                      Saved ✓
-                    </div>
                   )}
-                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsPanelOpen(!isPanelOpen)}
+                    className="text-gray-500 transition hover:text-gray-900"
+                  >
+                    {isPanelOpen ? "→" : "←"}
+                  </button>
                 </div>
+
+                {isPanelOpen && (
+                  <div className="space-y-6">
+                    {/* NOTES */}
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Notes
+                      </p>
+                      <textarea
+                        value={currentNote}
+                        onChange={(e) => setCurrentNote(e.target.value)}
+                        placeholder="Write your trade thoughts..."
+                        className="mt-2 w-full h-24 rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={handleSaveNote}
+                        disabled={savingNote}
+                        className="mt-2 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
+                      >
+                        {savingNote ? "Saving note..." : "Save note"}
+                      </button>
+
+                      {savedNoteToast && (
+                        <div className="mt-2 text-xs font-medium text-green-700">
+                          Saved ✓
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ATTRIBUTES */}
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Attributes
+                      </p>
+
+                      <datalist id="dashboard-trade-attr-keys">
+                        {uniqueKeys.map((k) => (
+                          <option key={k} value={k} />
+                        ))}
+                      </datalist>
+                      <datalist id="dashboard-trade-attr-values">
+                        {allUniqueAttributeValues.map((v) => (
+                          <option key={v} value={v} />
+                        ))}
+                      </datalist>
+
+                      <div className="mt-2 space-y-2">
+                        {attributes.map((attr, index) => (
+                          <div
+                            key={attr.id ?? index}
+                            className="group flex items-center gap-2"
+                          >
+                            <div className="flex min-w-0 flex-1 gap-2">
+                              <input
+                                value={attr.key || ""}
+                                onChange={(e) => {
+                                  const updated = [...attributes];
+                                  updated[index].key = e.target.value;
+                                  setAttributes(updated);
+                                }}
+                                placeholder="Field"
+                                list="dashboard-trade-attr-keys"
+                                autoComplete="off"
+                                className="w-1/2 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 placeholder:text-gray-500 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                              />
+
+                              <input
+                                value={attr.value || ""}
+                                onChange={(e) => {
+                                  const updated = [...attributes];
+                                  updated[index].value = e.target.value;
+                                  setAttributes(updated);
+                                }}
+                                placeholder="Value"
+                                list="dashboard-trade-attr-values"
+                                autoComplete="off"
+                                className="w-1/2 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 placeholder:text-gray-500 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                              />
+                            </div>
+
+                            <button
+                              type="button"
+                              aria-label="Remove attribute row"
+                              onClick={() => handleDeleteAttribute(index)}
+                              className="shrink-0 text-sm text-gray-400 opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAttributes([
+                            ...attributes,
+                            { id: `tmp-${Date.now()}-${Math.random()}`, key: "", value: "" },
+                          ])
+                        }
+                        className="mt-3 text-sm text-blue-600 hover:underline"
+                      >
+                        + Add field
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await handleSaveAttributes();
+                        }}
+                        disabled={savingAttributes}
+                        className="mt-3 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
+                      >
+                        {savingAttributes ? "Saving attributes..." : "Save attributes"}
+                      </button>
+
+                      {savedAttributesToast && (
+                        <div className="mt-2 text-xs font-medium text-green-700">
+                          Saved ✓
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1048,7 +1321,7 @@ export default function DashboardPage() {
               aria-label="Close modal"
               className="fixed top-4 z-[2147483646] flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900 text-xl text-white shadow-lg ring-2 ring-white/30 transition hover:bg-zinc-800"
               style={{
-                right: "clamp(1rem, calc(380px + 1rem), calc(100vw - 3rem))",
+                right: `clamp(1rem, calc(${panelWidth}px + 1rem), calc(100vw - 3rem))`,
               }}
             >
               ×
@@ -1095,7 +1368,7 @@ export default function DashboardPage() {
                     group-hover:opacity-100
                   "
                   style={{
-                    right: "clamp(1rem, calc(380px + 1rem), calc(100vw - 3rem))",
+                    right: `clamp(1rem, calc(${panelWidth}px + 1rem), calc(100vw - 3rem))`,
                   }}
                 >
                   →
@@ -1106,6 +1379,45 @@ export default function DashboardPage() {
               className="fixed bottom-4 left-1/2 z-[2147483645] -translate-x-1/2 rounded-full bg-black/50 px-3 py-1 text-sm text-white"
             >
               {selectedIndex! + 1} / {filteredScreenshots.length}
+            </div>
+
+            {undoData && (
+              <div
+                className="pointer-events-none fixed inset-x-0 bottom-0 z-[2147483647] flex justify-center pb-6"
+                role="status"
+              >
+                <div className="pointer-events-auto flex max-w-[min(100vw-2rem,28rem)] items-center gap-4 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-xl">
+                  <span>Attribute removed</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleUndo()}
+                    className="underline hover:text-gray-300"
+                  >
+                    Undo
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>,
+          document.body
+        )}
+
+      {undoData &&
+        !selectedImage &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed inset-x-0 bottom-0 z-[2147483647] flex justify-center pb-6"
+            role="status"
+          >
+            <div className="pointer-events-auto flex max-w-[min(100vw-2rem,28rem)] items-center gap-4 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-xl">
+              <span>Attribute removed</span>
+              <button
+                type="button"
+                onClick={() => void handleUndo()}
+                className="underline hover:text-gray-300"
+              >
+                Undo
+              </button>
             </div>
           </div>,
           document.body
