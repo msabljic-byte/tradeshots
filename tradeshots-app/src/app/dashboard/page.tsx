@@ -82,6 +82,7 @@ export default function DashboardPage() {
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<any[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [bulkTargetIds, setBulkTargetIds] = useState<string[]>([]);
   const [bulkBaseAttributes, setBulkBaseAttributes] = useState<any[] | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
@@ -1054,6 +1055,19 @@ export default function DashboardPage() {
     await fetchAllAttributes();
   }
 
+  async function handleBulkDelete() {
+    await supabase
+      .from("screenshots")
+      .delete()
+      .in("id", selectedIds);
+
+    setSelectedIds([]);
+    setLastSelectedIndex(null);
+    setShowDeleteConfirm(false);
+
+    await fetchScreenshots();
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
@@ -1400,6 +1414,14 @@ export default function DashboardPage() {
 
             <button
               type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="text-sm text-red-400 hover:text-red-300"
+            >
+              Delete
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 setSelectedIds([]);
                 setLastSelectedIndex(null);
@@ -1408,6 +1430,34 @@ export default function DashboardPage() {
             >
               Clear
             </button>
+          </div>
+        </div>
+      )}
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+            <p className="mb-4 text-sm text-gray-900">
+              Delete {selectedIds.length} screenshots?
+            </p>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleBulkDelete()}
+                className="rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}
