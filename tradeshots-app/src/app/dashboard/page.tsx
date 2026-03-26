@@ -80,6 +80,9 @@ export default function DashboardPage() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<any[]>([]);
+  const [bulkTargetIds, setBulkTargetIds] = useState<string[]>([]);
+  const [bulkBaseAttributes, setBulkBaseAttributes] = useState<any[] | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -103,6 +106,13 @@ export default function DashboardPage() {
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+
+  const multiSelectHint =
+    typeof navigator !== "undefined" &&
+    (navigator.platform?.includes("Mac") ||
+      navigator.userAgent?.includes("Mac OS"))
+      ? "Hold ⌘ to select multiple"
+      : "Hold Ctrl to select multiple";
 
   function handleImageLoaded(id: string) {
     setLoadedImages((prev) => ({ ...prev, [id]: true }));
@@ -658,6 +668,8 @@ export default function DashboardPage() {
   useEffect(() => {
     if (selectedIndex === null) {
       setUndoData(null);
+      setBulkTargetIds([]);
+      setBulkBaseAttributes(null);
     }
   }, [selectedIndex]);
 
@@ -822,6 +834,102 @@ export default function DashboardPage() {
 
   async function handleSaveAttributes() {
     if (selectedIndex === null) return;
+
+    // Bulk "Add Attribute" mode: apply ONLY the changes (delta) made in the modal
+    // to all selected screenshots, without clobbering unrelated attributes.
+    if (bulkTargetIds.length > 0 && bulkBaseAttributes) {
+      setSavingAttributes(true);
+      setError(null);
+
+      try {
+        const user = (await supabase.auth.getUser()).data.user;
+        if (!user) {
+          setError("User not found.");
+          return;
+        }
+
+        const normalizePairs = (rows: any[]) => {
+          const out: Array<{ sig: string; key: string; value: string }> = [];
+          for (const r of rows ?? []) {
+            const keyRaw = (r?.key ?? "").toString();
+            const valueRaw = (r?.value ?? "").toString();
+            const key = keyRaw.trim();
+            if (!key) continue;
+            const value = valueRaw.trim();
+
+            const sig = `${key.toLowerCase()}\0${value.toLowerCase()}`;
+            out.push({ sig, key, value });
+          }
+          return out;
+        };
+
+        const basePairs = normalizePairs(bulkBaseAttributes);
+        const newPairs = normalizePairs(attributes);
+
+        const baseSigSet = new Set(basePairs.map((p) => p.sig));
+        const newSigSet = new Set(newPairs.map((p) => p.sig));
+
+        const toAdd = newPairs.filter((p) => !baseSigSet.has(p.sig));
+        const toRemove = basePairs.filter((p) => !newSigSet.has(p.sig));
+
+        // Remove deleted attributes across all selected screenshots.
+        for (const p of toRemove) {
+          await supabase
+            .from("trade_attributes")
+            .delete()
+            .in("screenshot_id", bulkTargetIds)
+            .eq("key", p.key)
+            .eq("value", p.value);
+        }
+
+        // Add newly added attributes across all selected screenshots.
+        for (const p of toAdd) {
+          // If DB enforces uniqueness by key (common), remove any existing value for this key.
+          const { error: deleteKeyError } = await supabase
+            .from("trade_attributes")
+            .delete()
+            .in("screenshot_id", bulkTargetIds)
+            .eq("key", p.key);
+
+          if (deleteKeyError) {
+            setError(deleteKeyError.message);
+            return;
+          }
+
+          const rows = bulkTargetIds.map((sid) => ({
+            screenshot_id: sid,
+            user_id: user.id,
+            key: p.key,
+            value: p.value,
+          }));
+
+          if (rows.length > 0) {
+            const { error: insertError } = await supabase
+              .from("trade_attributes")
+              .insert(rows);
+
+            if (insertError) {
+              setError(insertError.message);
+              return;
+            }
+          }
+        }
+
+        await fetchAllAttributes();
+        await refreshTradeAttributesIndex();
+
+        setSavedAttributesToast(true);
+        setTimeout(() => setSavedAttributesToast(false), 2000);
+      } finally {
+        setSavingAttributes(false);
+      }
+
+      setBulkTargetIds([]);
+      setBulkBaseAttributes(null);
+      setSelectedIndex(null);
+      return;
+    }
+
     await saveAttributes(attributes);
   }
 
@@ -899,12 +1007,60 @@ export default function DashboardPage() {
     selectedIndex !== null ? filteredScreenshots[selectedIndex] ?? null : null;
   const panelWidth = isPanelOpen ? 380 : 48;
 
+  async function openBulkModal() {
+    const ids = selectedIds.filter(Boolean).map((id) => String(id));
+    const firstId = ids[0];
+    if (!firstId) return;
+
+    const idx = filteredScreenshots.findIndex((s) => s.id === firstId);
+    if (idx === -1) return;
+
+    setBulkTargetIds(ids);
+    setBulkBaseAttributes(null);
+
+    const { data: baseData } = await supabase
+      .from("trade_attributes")
+      .select("*")
+      .eq("screenshot_id", firstId);
+
+    setBulkBaseAttributes(baseData ?? []);
+
+    setSelectedIds([]);
+    setSelectedIndex(idx);
+  }
+
+  function toggleSelectedId(id: string) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((existing) => existing !== id) : [...prev, id]
+    );
+  }
+
+  async function applyBulkAttribute(key: string, value: string) {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) return;
+    if (!selectedIds.length) return;
+
+    const rows = selectedIds.map((id) => ({
+      screenshot_id: id,
+      user_id: user.id,
+      key,
+      value,
+    }));
+
+    await supabase.from("trade_attributes").insert(rows);
+
+    setSelectedIds([]);
+
+    await fetchAllAttributes();
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-900">TradeShots</h1>
-          <div className="profile-menu relative">
+          <div className="flex items-center gap-3">
+            <div className="profile-menu relative">
             <button
               type="button"
               onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -927,6 +1083,7 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
+            </div>
           </div>
         </div>
 
@@ -1137,9 +1294,29 @@ export default function DashboardPage() {
                 {filteredScreenshots.map((shot, index) => (
                   <div
                     key={shot.id}
-                    onClick={() => setSelectedIndex(index)}
-                    className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                    title="Ctrl + Click to select multiple"
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        toggleSelectedId(shot.id);
+                        return;
+                      }
+
+                      setSelectedIndex(index);
+                    }}
+                    className={`group relative flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md ${
+                      selectedIds.length > 0 ? "cursor-pointer" : ""
+                    } ${
+                      selectedIds.includes(shot.id)
+                        ? "ring-2 ring-gray-900 scale-[0.98]"
+                        : ""
+                    }`}
                   >
+                    {selectedIds.includes(shot.id) && (
+                      <div className="absolute top-2 left-2 rounded bg-white p-1 shadow">
+                        ✓
+                      </div>
+                    )}
                     <div className="relative h-48 w-full overflow-hidden bg-gray-100">
                       <img
                         src={shot.image_url}
@@ -1169,6 +1346,14 @@ export default function DashboardPage() {
                         </div>
                       )}
                     </div>
+
+                    {selectedIds.length === 0 && (
+                      <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                        <div className="whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs text-white shadow-lg">
+                          {multiSelectHint}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1176,6 +1361,30 @@ export default function DashboardPage() {
           </>
         )}
       </div>
+
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          <div className="flex items-center gap-4 rounded-xl bg-gray-900 text-white px-6 py-3 shadow-lg">
+            <span className="text-sm">{selectedIds.length} selected</span>
+
+            <button
+              type="button"
+              onClick={() => void openBulkModal()}
+              className="text-sm underline"
+            >
+              Add Attribute
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="text-sm text-gray-300 hover:text-white"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {false && (
         <div
