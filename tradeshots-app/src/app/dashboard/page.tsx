@@ -80,6 +80,9 @@ export default function DashboardPage() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
+  const [draggedScreenshotId, setDraggedScreenshotId] = useState<string[]>([]);
+  const [hoverFolderId, setHoverFolderId] = useState<string | null>(null);
+  const [commandActiveIndex, setCommandActiveIndex] = useState<number>(-1);
   const [selectedIds, setSelectedIds] = useState<any[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -96,6 +99,7 @@ export default function DashboardPage() {
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [folders, setFolders] = useState<any[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -110,9 +114,9 @@ export default function DashboardPage() {
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [isMacPlatform, setIsMacPlatform] = useState(false);
 
-  const multiSelectHint =
-    typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+  const multiSelectHint = isMacPlatform
       ? "⌘ to select • ⇧ to select range"
       : "Ctrl to select • Shift to select range";
 
@@ -256,6 +260,19 @@ export default function DashboardPage() {
     await fetchFolders();
   }
 
+  function toggleFolder(id: string) {
+    setExpandedFolders((prev) => {
+      const copy = new Set(prev);
+      if (copy.has(id)) copy.delete(id);
+      else copy.add(id);
+      return copy;
+    });
+  }
+
+  function hasChildren(folderId: string) {
+    return folders.some((f: any) => f.parent_id === folderId);
+  }
+
   async function handleSaveView() {
     if (!viewName || filters.length === 0) return;
 
@@ -374,6 +391,11 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    setIsMacPlatform(navigator.platform.includes("Mac"));
   }, []);
 
   useEffect(() => {
@@ -1015,26 +1037,6 @@ export default function DashboardPage() {
     setUndoData(null);
   }
 
-  if (checkingSession) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
-          <p className="text-sm text-gray-600">Checking your session...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
-          <p className="text-sm text-gray-600">Loading screenshots...</p>
-        </div>
-      </div>
-    );
-  }
-
   const tagFilterLower = tagFilter.trim().toLowerCase();
 
   const filteredScreenshots = screenshots.filter((s) => {
@@ -1057,6 +1059,13 @@ export default function DashboardPage() {
   const selectedImage =
     selectedIndex !== null ? filteredScreenshots[selectedIndex] ?? null : null;
   const panelWidth = isPanelOpen ? 380 : 48;
+  const profileInitials = (email ?? "?")
+    .split("@")[0]
+    .split(/[.\-_ ]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "?";
 
   async function openBulkModal() {
     const ids = selectedIds.filter(Boolean).map((id) => String(id));
@@ -1085,6 +1094,26 @@ export default function DashboardPage() {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((existing) => existing !== id) : [...prev, id]
     );
+  }
+
+  function openScreenshotFromCommand(screenshotId: string) {
+    const currentFilteredIndex = filteredScreenshots.findIndex(
+      (s) => s.id === screenshotId
+    );
+    if (currentFilteredIndex >= 0) {
+      setSelectedIndex(currentFilteredIndex);
+      return;
+    }
+
+    // If hidden by active filters, clear filters then open within full list.
+    setTagFilter("");
+    setFilters([]);
+    window.setTimeout(() => {
+      const allIndex = screenshots.findIndex((s) => s.id === screenshotId);
+      if (allIndex >= 0) {
+        setSelectedIndex(allIndex);
+      }
+    }, 0);
   }
 
   async function applyBulkAttribute(key: string, value: string) {
@@ -1119,18 +1148,200 @@ export default function DashboardPage() {
     await fetchScreenshots();
   }
 
+  const commandViewResults = useMemo(() => {
+    const q = commandQuery.trim().toLowerCase();
+    const source = savedViews ?? [];
+    if (!q) return source.slice(0, 12);
+    return source
+      .filter((v) => String(v?.name ?? "").toLowerCase().includes(q))
+      .slice(0, 12);
+  }, [savedViews, commandQuery]);
+
+  const commandScreenshotResults = useMemo(() => {
+    const q = commandQuery.trim().toLowerCase();
+    if (!q) return [];
+    return screenshots
+      .filter((s) => {
+        const inNotes = String(s?.notes ?? "").toLowerCase().includes(q);
+        const inTags = (s.tags ?? []).some((tag) =>
+          String(tag).toLowerCase().includes(q)
+        );
+        return inNotes || inTags;
+      })
+      .slice(0, 20);
+  }, [screenshots, commandQuery]);
+
+  const commandItems = useMemo(
+    () => [
+      ...commandViewResults.map((view: any) => ({
+        type: "view" as const,
+        id: String(view.id),
+        label: String(view.name ?? ""),
+        payload: view,
+      })),
+      ...commandScreenshotResults.map((shot) => ({
+        type: "screenshot" as const,
+        id: String(shot.id),
+        label:
+          shot.tags && shot.tags.length > 0
+            ? shot.tags.join(", ")
+            : String(shot.notes ?? "Open screenshot"),
+        payload: shot,
+      })),
+    ],
+    [commandViewResults, commandScreenshotResults]
+  );
+
+  function renderFolders(parentId: string | null = null, level = 0) {
+    return folders
+      .filter((f: any) => f.parent_id === parentId)
+      .map((folder: any) => {
+        const isExpanded = expandedFolders.has(String(folder.id));
+        const isActive = activeFolderId === folder.id;
+
+        return (
+          <div key={folder.id}>
+            <div
+              className={`
+                group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5
+                ${isActive ? "bg-gray-900 text-white" : "text-gray-700 hover:bg-gray-100"}
+                ${draggedScreenshotId.length > 0 ? "hover:bg-blue-100" : ""}
+                ${hoverFolderId === folder.id ? "bg-blue-100" : ""}
+              `}
+              style={{ paddingLeft: `${8 + level * 16}px` }}
+              title={hasChildren(String(folder.id)) ? "Click arrow to expand" : ""}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setHoverFolderId(folder.id);
+              }}
+              onDragEnter={() => setHoverFolderId(folder.id)}
+              onDrop={async (e) => {
+                e.preventDefault();
+
+                if (!draggedScreenshotId || draggedScreenshotId.length === 0) return;
+
+                await supabase
+                  .from("screenshots")
+                  .update({ folder_id: folder.id })
+                  .in("id", draggedScreenshotId);
+
+                setDraggedScreenshotId([]);
+                setHoverFolderId(null);
+                setSelectedIds([]);
+                await fetchScreenshots();
+              }}
+            >
+              {hasChildren(String(folder.id)) ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFolder(String(folder.id));
+                  }}
+                  className={`text-xs ${
+                    isActive ? "text-white/80 hover:text-white" : "text-gray-500 hover:text-gray-900"
+                  }`}
+                >
+                  {isExpanded ? "▼" : "▶"}
+                </button>
+              ) : (
+                <span className="w-3" />
+              )}
+
+              <span
+                onClick={() => setActiveFolderId(folder.id)}
+                className="flex-1 truncate text-sm"
+              >
+                📁 {folder.name}
+              </span>
+            </div>
+
+            {isExpanded && renderFolders(folder.id, level + 1)}
+          </div>
+        );
+      });
+  }
+
+  function executeCommandItem(item: (typeof commandItems)[number]) {
+    if (!item) return;
+    if (item.type === "view") {
+      applyView(item.payload);
+      setIsCommandOpen(false);
+      return;
+    }
+
+    openScreenshotFromCommand(item.id);
+    setIsCommandOpen(false);
+  }
+
+  useEffect(() => {
+    if (!isCommandOpen) {
+      setCommandActiveIndex(-1);
+      return;
+    }
+
+    if (commandItems.length === 0) {
+      setCommandActiveIndex(-1);
+      return;
+    }
+
+    setCommandActiveIndex((prev) =>
+      prev < 0 || prev >= commandItems.length ? 0 : prev
+    );
+  }, [isCommandOpen, commandItems.length]);
+
+  useEffect(() => {
+    if (!isCommandOpen) return;
+
+    function handleCommandNav(e: KeyboardEvent) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (commandItems.length === 0) return;
+        setCommandActiveIndex((prev) =>
+          prev < 0 ? 0 : (prev + 1) % commandItems.length
+        );
+        return;
+      }
+
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (commandItems.length === 0) return;
+        setCommandActiveIndex((prev) =>
+          prev < 0
+            ? commandItems.length - 1
+            : (prev - 1 + commandItems.length) % commandItems.length
+        );
+        return;
+      }
+
+      if (e.key === "Enter") {
+        if (commandActiveIndex < 0 || commandActiveIndex >= commandItems.length)
+          return;
+        e.preventDefault();
+        executeCommandItem(commandItems[commandActiveIndex]);
+      }
+    }
+
+    window.addEventListener("keydown", handleCommandNav);
+    return () => window.removeEventListener("keydown", handleCommandNav);
+  }, [isCommandOpen, commandItems, commandActiveIndex]);
+
   return (
     <div className="flex h-screen bg-gray-50">
-      <div className="flex w-64 flex-col border-r border-gray-200 bg-white p-4">
+      <div
+        className="flex w-64 flex-col border-r border-gray-200 bg-white p-4"
+        onDragOver={(e) => e.preventDefault()}
+      >
         <h1 className="mb-6 text-lg font-semibold text-gray-900">TradeShots</h1>
 
         <button
           type="button"
           onClick={() => {
             const name = prompt("Folder name");
-            if (name) {
-              void createFolder(name);
-            }
+            if (!name) return;
+
+            void createFolder(name, activeFolderId);
           }}
           className="mb-4 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50"
         >
@@ -1152,22 +1363,7 @@ export default function DashboardPage() {
             All Screenshots
           </button>
 
-          {folders.map((folder) => (
-            <button
-              key={folder.id}
-              type="button"
-              onClick={() => setActiveFolderId(folder.id)}
-              className={`
-                w-full rounded-lg px-3 py-2 text-left text-sm
-                ${activeFolderId === folder.id
-                  ? "bg-gray-900 text-white"
-                  : "text-gray-700 hover:bg-gray-100"
-                }
-              `}
-            >
-              📁 {folder.name}
-            </button>
-          ))}
+          <div className="space-y-1">{renderFolders(null, 0)}</div>
         </div>
       </div>
 
@@ -1184,26 +1380,41 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          <div className="ml-4 flex items-center gap-3">
+          <div className="ml-4 flex min-w-[44px] items-center justify-end">
             <div className="profile-menu relative">
               <button
                 type="button"
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-gray-700 transition hover:bg-gray-300"
+                aria-expanded={isProfileOpen}
+                aria-haspopup="menu"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 bg-white text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300"
               >
-                👤
+                {profileInitials}
               </button>
 
               {isProfileOpen && (
-                <div className="absolute right-0 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
-                  <p className="mb-2 text-sm text-gray-900">{email ?? ""}</p>
+                <div className="absolute right-0 top-full z-50 mt-2 w-56 origin-top-right rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
+                  <div className="px-2 py-1">
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500">
+                      Signed in as
+                    </p>
+                    <p className="truncate text-sm text-gray-900">{email ?? ""}</p>
+                  </div>
+                  <div className="my-1 border-t border-gray-100" />
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm text-gray-500"
+                    disabled
+                  >
+                    Account settings
+                  </button>
                   <button
                     type="button"
                     onClick={handleLogout}
                     disabled={signingOut}
-                    className="w-full rounded px-2 py-1 text-left text-sm text-red-600 transition hover:bg-gray-100 disabled:opacity-60"
+                    className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm text-red-600 transition hover:bg-gray-100 disabled:opacity-60"
                   >
-                    {signingOut ? "Signing out…" : "Log out"}
+                    {signingOut ? "Signing out..." : "Log out"}
                   </button>
                 </div>
               )}
@@ -1218,23 +1429,33 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="mb-6">
-            <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
-          </div>
-
-          <div className="mb-6">
-            <ScreenshotUploader onUploadComplete={fetchScreenshots} />
-          </div>
-
-          {screenshots.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <p className="text-lg font-medium text-gray-900">No screenshots yet</p>
-              <p className="mt-2 text-sm text-gray-600">
-                Upload your first trade to get started
-              </p>
+          {checkingSession ? (
+            <div className="py-20 text-center">
+              <p className="text-sm text-gray-600">Checking your session...</p>
+            </div>
+          ) : loading ? (
+            <div className="py-20 text-center">
+              <p className="text-sm text-gray-600">Loading screenshots...</p>
             </div>
           ) : (
             <>
+              <div className="mb-6">
+                <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
+              </div>
+
+              <div className="mb-6">
+                <ScreenshotUploader onUploadComplete={fetchScreenshots} />
+              </div>
+
+              {screenshots.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <p className="text-lg font-medium text-gray-900">No screenshots yet</p>
+                  <p className="mt-2 text-sm text-gray-600">
+                    Upload your first trade to get started
+                  </p>
+                </div>
+              ) : (
+              <>
               <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
                 <div className="mb-4 flex items-center gap-2">
                   <input
@@ -1410,6 +1631,47 @@ export default function DashboardPage() {
                   {filteredScreenshots.map((shot, index) => (
                     <div
                       key={shot.id}
+                      draggable
+                      onDragStart={(e) => {
+                        let idsToDrag: string[] = [];
+
+                        if (selectedIds.includes(shot.id)) {
+                          idsToDrag = selectedIds.map((id) => String(id));
+                        } else {
+                          idsToDrag = [shot.id];
+                          setSelectedIds([shot.id]);
+                        }
+
+                        setDraggedScreenshotId(idsToDrag);
+                        e.dataTransfer.setData("text/plain", JSON.stringify(idsToDrag));
+                        e.dataTransfer.effectAllowed = "move";
+
+                        // Use a small custom drag preview instead of full card image.
+                        const ghost = document.createElement("div");
+                        ghost.style.position = "fixed";
+                        ghost.style.top = "-1000px";
+                        ghost.style.left = "-1000px";
+                        ghost.style.padding = "6px 10px";
+                        ghost.style.borderRadius = "8px";
+                        ghost.style.background = "rgba(17,24,39,0.92)";
+                        ghost.style.color = "#fff";
+                        ghost.style.fontSize = "12px";
+                        ghost.style.fontWeight = "600";
+                        ghost.style.pointerEvents = "none";
+                        ghost.textContent =
+                          idsToDrag.length > 1
+                            ? `Moving ${idsToDrag.length} screenshots`
+                            : "Moving screenshot";
+                        document.body.appendChild(ghost);
+                        e.dataTransfer.setDragImage(ghost, 12, 12);
+                        window.setTimeout(() => {
+                          ghost.remove();
+                        }, 0);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedScreenshotId([]);
+                        setHoverFolderId(null);
+                      }}
                       title="Ctrl + Click to select multiple"
                       onClick={(e) => {
                         const isMulti = e.ctrlKey || e.metaKey;
@@ -1459,6 +1721,7 @@ export default function DashboardPage() {
                       <div className="relative h-48 w-full overflow-hidden bg-gray-100">
                         <img
                           src={shot.image_url}
+                          draggable={false}
                           alt="Uploaded screenshot"
                           onLoad={() => handleImageLoaded(shot.id)}
                           className={`h-48 w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] ${
@@ -1498,6 +1761,8 @@ export default function DashboardPage() {
                 </div>
               )}
             </>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1534,6 +1799,12 @@ export default function DashboardPage() {
               Clear
             </button>
           </div>
+        </div>
+      )}
+
+      {draggedScreenshotId.length > 1 && (
+        <div className="fixed bottom-6 right-6 rounded bg-gray-900 px-3 py-1 text-xs text-white shadow">
+          {draggedScreenshotId.length} items
         </div>
       )}
 
@@ -1724,34 +1995,6 @@ export default function DashboardPage() {
 
                 {isPanelOpen && (
                   <div className="space-y-6">
-                    {/* NOTES */}
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Notes
-                      </p>
-                      <textarea
-                        value={currentNote}
-                        onChange={(e) => setCurrentNote(e.target.value)}
-                        placeholder="Write your trade thoughts..."
-                        className="mt-2 w-full h-24 rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900"
-                      />
-
-                      <button
-                        type="button"
-                        onClick={handleSaveNote}
-                        disabled={savingNote}
-                        className="mt-2 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
-                      >
-                        {savingNote ? "Saving note..." : "Save note"}
-                      </button>
-
-                      {savedNoteToast && (
-                        <div className="mt-2 text-xs font-medium text-green-700">
-                          Saved ✓
-                        </div>
-                      )}
-                    </div>
-
                     {/* ATTRIBUTES */}
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -1841,6 +2084,34 @@ export default function DashboardPage() {
                       </button>
 
                       {savedAttributesToast && (
+                        <div className="mt-2 text-xs font-medium text-green-700">
+                          Saved ✓
+                        </div>
+                      )}
+                    </div>
+
+                    {/* NOTES */}
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Notes
+                      </p>
+                      <textarea
+                        value={currentNote}
+                        onChange={(e) => setCurrentNote(e.target.value)}
+                        placeholder="Write your trade thoughts..."
+                        className="mt-2 w-full h-24 rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={handleSaveNote}
+                        disabled={savingNote}
+                        className="mt-2 w-full rounded-lg bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 active:scale-[0.98] disabled:active:scale-100"
+                      >
+                        {savingNote ? "Saving note..." : "Save note"}
+                      </button>
+
+                      {savedNoteToast && (
                         <div className="mt-2 text-xs font-medium text-green-700">
                           Saved ✓
                         </div>
@@ -1978,24 +2249,70 @@ export default function DashboardPage() {
             />
 
             <div className="max-h-80 overflow-y-auto">
-              {savedViews
-                .filter((v) =>
-                  v.name.toLowerCase().includes(commandQuery.toLowerCase())
-                )
-                .map((view) => (
+              {commandViewResults.length > 0 && (
+                <div className="border-b border-gray-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Saved Views
+                </div>
+              )}
+              {commandViewResults.map((view) => {
+                const flatIndex = commandItems.findIndex(
+                  (item) => item.type === "view" && item.id === String(view.id)
+                );
+                return (
                   <div
-                    key={view.id}
-                    onClick={() => {
-                      applyView(view);
-                      setIsCommandOpen(false);
-                    }}
-                    className="cursor-pointer px-4 py-2 text-sm text-gray-800 hover:bg-gray-100"
+                    key={`view-${view.id}`}
+                    onClick={() =>
+                      executeCommandItem({
+                        type: "view",
+                        id: String(view.id),
+                        label: String(view.name ?? ""),
+                        payload: view,
+                      })
+                    }
+                    className={`cursor-pointer px-4 py-2 text-sm text-gray-800 hover:bg-gray-100 ${
+                      flatIndex === commandActiveIndex ? "bg-gray-100" : ""
+                    }`}
                   >
                     🔎 {view.name}
                   </div>
-                ))}
+                );
+              })}
 
-              {savedViews.length === 0 && (
+              {commandScreenshotResults.length > 0 && (
+                <div className="border-b border-t border-gray-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Screenshots
+                </div>
+              )}
+              {commandScreenshotResults.map((shot) => {
+                const flatIndex = commandItems.findIndex(
+                  (item) =>
+                    item.type === "screenshot" && item.id === String(shot.id)
+                );
+                const preview =
+                  shot.tags && shot.tags.length > 0
+                    ? shot.tags.join(", ")
+                    : shot.notes || "Open screenshot";
+                return (
+                  <div
+                    key={`shot-${shot.id}`}
+                    onClick={() =>
+                      executeCommandItem({
+                        type: "screenshot",
+                        id: String(shot.id),
+                        label: String(preview),
+                        payload: shot,
+                      })
+                    }
+                    className={`cursor-pointer px-4 py-2 text-sm text-gray-800 hover:bg-gray-100 ${
+                      flatIndex === commandActiveIndex ? "bg-gray-100" : ""
+                    }`}
+                  >
+                    🖼 {preview}
+                  </div>
+                );
+              })}
+
+              {commandItems.length === 0 && (
                 <div className="px-4 py-3 text-sm text-gray-500">
                   No results found
                 </div>
