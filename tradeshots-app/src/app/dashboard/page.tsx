@@ -83,6 +83,10 @@ export default function DashboardPage() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+
+  const [savedViews, setSavedViews] = useState<any[]>([]);
+  const [viewName, setViewName] = useState("");
+
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [savedNoteToast, setSavedNoteToast] = useState(false);
@@ -186,6 +190,42 @@ export default function DashboardPage() {
     setAllAttributes(data ?? []);
   }, []);
 
+  async function fetchSavedViews() {
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) {
+      setSavedViews([]);
+      return;
+    }
+
+    const { data } = await supabase
+      .from("saved_views")
+      .select("*")
+      .eq("user_id", user.id);
+
+    setSavedViews(data || []);
+  }
+
+  async function handleSaveView() {
+    if (!viewName || filters.length === 0) return;
+
+    const user = (await supabase.auth.getUser()).data.user;
+    if (!user) return;
+
+    await supabase.from("saved_views").insert({
+      user_id: user.id,
+      name: viewName,
+      filters: filters,
+    });
+
+    setViewName("");
+    await fetchSavedViews();
+  }
+
+  function applyView(view: any) {
+    if (!view?.filters) return;
+    setFilters(view.filters);
+  }
+
   /** Rebuild per-screenshot attribute map from DB (same source as grid filters + autocomplete) */
   const refreshTradeAttributesIndex = useCallback(async () => {
     const {
@@ -246,6 +286,10 @@ export default function DashboardPage() {
       setCheckingSession(false);
     });
   }, [router, fetchAllAttributes]);
+
+  useEffect(() => {
+    fetchSavedViews();
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -874,6 +918,36 @@ export default function DashboardPage() {
         ) : (
           <>
             <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="mb-4 flex items-center gap-2">
+                <input
+                  value={viewName}
+                  onChange={(e) => setViewName(e.target.value)}
+                  placeholder="View name"
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => void handleSaveView()}
+                  className="rounded-lg bg-gray-900 px-3 py-1 text-sm text-white"
+                >
+                  Save View
+                </button>
+              </div>
+
+              <div className="mb-4 flex flex-wrap gap-2">
+                {savedViews.map((view) => (
+                  <button
+                    key={view.id}
+                    type="button"
+                    onClick={() => applyView(view)}
+                    className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800 transition hover:bg-gray-200"
+                  >
+                    {view.name}
+                  </button>
+                ))}
+              </div>
+
               <input
                 type="text"
                 value={tagFilter}
@@ -897,7 +971,7 @@ export default function DashboardPage() {
                 {filters.map((f, index) => (
                   <div
                     key={`${f.key}-${f.value}-${index}`}
-                    className="flex items-center gap-2 rounded-full bg-gray-900 px-3 py-1 text-sm text-white shadow-sm"
+                    className="flex items-center gap-2 rounded-full bg-gray-900 px-3 py-1 text-sm text-white"
                   >
                     <span className="font-medium">
                       {f.key}: {f.value}
