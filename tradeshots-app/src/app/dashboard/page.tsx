@@ -1025,6 +1025,7 @@ export default function DashboardPage() {
     setBulkBaseAttributes(baseData ?? []);
 
     setSelectedIds([]);
+    setLastSelectedIndex(null);
     setSelectedIndex(idx);
   }
 
@@ -1399,7 +1400,10 @@ export default function DashboardPage() {
 
             <button
               type="button"
-              onClick={() => setSelectedIds([])}
+              onClick={() => {
+                setSelectedIds([]);
+                setLastSelectedIndex(null);
+              }}
               className="text-sm text-gray-300 hover:text-white"
             >
               Clear
