@@ -81,6 +81,7 @@ export default function DashboardPage() {
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<any[]>([]);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [bulkTargetIds, setBulkTargetIds] = useState<string[]>([]);
   const [bulkBaseAttributes, setBulkBaseAttributes] = useState<any[] | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
@@ -108,11 +109,9 @@ export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
 
   const multiSelectHint =
-    typeof navigator !== "undefined" &&
-    (navigator.platform?.includes("Mac") ||
-      navigator.userAgent?.includes("Mac OS"))
-      ? "Hold ⌘ to select multiple"
-      : "Hold Ctrl to select multiple";
+    typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+      ? "⌘ to select • ⇧ to select range"
+      : "Ctrl to select • Shift to select range";
 
   function handleImageLoaded(id: string) {
     setLoadedImages((prev) => ({ ...prev, [id]: true }));
@@ -1296,9 +1295,32 @@ export default function DashboardPage() {
                     key={shot.id}
                     title="Ctrl + Click to select multiple"
                     onClick={(e) => {
-                      if (e.ctrlKey || e.metaKey) {
+                      const isMulti = e.ctrlKey || e.metaKey;
+                      const isShift = e.shiftKey;
+
+                      if (isShift && lastSelectedIndex !== null) {
+                        const start = Math.min(lastSelectedIndex, index);
+                        const end = Math.max(lastSelectedIndex, index);
+
+                        const rangeIds = filteredScreenshots
+                          .slice(start, end + 1)
+                          .map((s) => s.id);
+
+                        setSelectedIds((prev) => [
+                          ...new Set([...prev, ...rangeIds]),
+                        ]);
+                        setLastSelectedIndex(index);
+                        return;
+                      }
+
+                      if (isMulti) {
                         e.preventDefault();
-                        toggleSelectedId(shot.id);
+                        setSelectedIds((prev) =>
+                          prev.includes(shot.id)
+                            ? prev.filter((id) => id !== shot.id)
+                            : [...prev, shot.id]
+                        );
+                        setLastSelectedIndex(index);
                         return;
                       }
 
@@ -1348,8 +1370,8 @@ export default function DashboardPage() {
                     </div>
 
                     {selectedIds.length === 0 && (
-                      <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                        <div className="whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs text-white shadow-lg">
+                      <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200">
+                        <div className="whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-lg">
                           {multiSelectHint}
                         </div>
                       </div>
