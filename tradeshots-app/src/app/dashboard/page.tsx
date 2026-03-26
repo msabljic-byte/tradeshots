@@ -78,6 +78,8 @@ export default function DashboardPage() {
   >([]);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isCommandOpen, setIsCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -86,6 +88,7 @@ export default function DashboardPage() {
 
   const [savedViews, setSavedViews] = useState<any[]>([]);
   const [viewName, setViewName] = useState("");
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -224,6 +227,27 @@ export default function DashboardPage() {
   function applyView(view: any) {
     if (!view?.filters) return;
     setFilters(view.filters);
+    setActiveViewId(view.id);
+  }
+
+  async function deleteView(id: string) {
+    await supabase.from("saved_views").delete().eq("id", id);
+
+    setSavedViews((prev) => prev.filter((v) => v.id !== id));
+
+    if (activeViewId === id) {
+      setActiveViewId(null);
+      setFilters([]);
+    }
+  }
+
+  async function renameView(id: string, newName: string) {
+    await supabase
+      .from("saved_views")
+      .update({ name: newName })
+      .eq("id", id);
+
+    await fetchSavedViews();
   }
 
   /** Rebuild per-screenshot attribute map from DB (same source as grid filters + autocomplete) */
@@ -305,6 +329,18 @@ export default function DashboardPage() {
 
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsCommandOpen((prev) => !prev);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {
@@ -918,6 +954,15 @@ export default function DashboardPage() {
         ) : (
           <>
             <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsCommandOpen(true)}
+                className="mb-4 flex w-full max-w-md items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-500 transition hover:bg-gray-50"
+              >
+                <span>Search or jump to…</span>
+                <span className="text-xs text-gray-400">Ctrl + K</span>
+              </button>
+
               <div className="mb-4 flex items-center gap-2">
                 <input
                   value={viewName}
@@ -937,14 +982,44 @@ export default function DashboardPage() {
 
               <div className="mb-4 flex flex-wrap gap-2">
                 {savedViews.map((view) => (
-                  <button
-                    key={view.id}
-                    type="button"
-                    onClick={() => applyView(view)}
-                    className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800 transition hover:bg-gray-200"
-                  >
-                    {view.name}
-                  </button>
+                  <div key={view.id} className="group flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => applyView(view)}
+                      className={`
+                        rounded-full px-3 py-1 text-sm transition
+                        ${activeViewId === view.id
+                          ? "bg-gray-900 text-white"
+                          : "bg-gray-100 text-gray-800 hover:bg-gray-200"
+                        }
+                      `}
+                    >
+                      {view.name}
+                    </button>
+
+                    <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newName = prompt("Rename view", view.name);
+                          if (newName) {
+                            void renameView(view.id, newName);
+                          }
+                        }}
+                        className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-gray-900"
+                      >
+                        ✏
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void deleteView(view.id)}
+                        className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-red-600"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
 
@@ -1496,6 +1571,45 @@ export default function DashboardPage() {
           </div>,
           document.body
         )}
+
+      {isCommandOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/40 pt-32">
+          <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+            <input
+              autoFocus
+              value={commandQuery}
+              onChange={(e) => setCommandQuery(e.target.value)}
+              placeholder="Search screenshots, views..."
+              className="w-full border-b border-gray-200 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none"
+            />
+
+            <div className="max-h-80 overflow-y-auto">
+              {savedViews
+                .filter((v) =>
+                  v.name.toLowerCase().includes(commandQuery.toLowerCase())
+                )
+                .map((view) => (
+                  <div
+                    key={view.id}
+                    onClick={() => {
+                      applyView(view);
+                      setIsCommandOpen(false);
+                    }}
+                    className="cursor-pointer px-4 py-2 text-sm text-gray-800 hover:bg-gray-100"
+                  >
+                    🔎 {view.name}
+                  </div>
+                ))}
+
+              {savedViews.length === 0 && (
+                <div className="px-4 py-3 text-sm text-gray-500">
+                  No results found
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
