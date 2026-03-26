@@ -86,6 +86,7 @@ export default function DashboardPage() {
   const [selectedIds, setSelectedIds] = useState<any[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
   const [bulkTargetIds, setBulkTargetIds] = useState<string[]>([]);
   const [bulkBaseAttributes, setBulkBaseAttributes] = useState<any[] | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
@@ -1201,6 +1202,20 @@ export default function DashboardPage() {
     await fetchScreenshots();
   }
 
+  async function moveToFolder(folderId: string) {
+    if (!selectedIds.length) return;
+
+    await supabase
+      .from("screenshots")
+      .update({ folder_id: folderId })
+      .in("id", selectedIds);
+
+    setSelectedIds([]);
+    setShowMoveMenu(false);
+
+    await fetchScreenshots();
+  }
+
   const commandViewResults = useMemo(() => {
     const q = commandQuery.trim().toLowerCase();
     const source = savedViews ?? [];
@@ -1344,6 +1359,25 @@ export default function DashboardPage() {
       });
   }
 
+  function renderFolderOptions(parentId: string | null = null, level = 0) {
+    return folders
+      .filter((f: any) => f.parent_id === parentId)
+      .map((folder: any) => (
+        <div key={`move-${folder.id}`}>
+          <button
+            type="button"
+            onClick={() => void moveToFolder(folder.id)}
+            className="w-full rounded px-3 py-2 text-left text-sm text-gray-800 transition hover:bg-gray-100"
+            style={{ paddingLeft: `${12 + level * 16}px` }}
+          >
+            📁 {folder.name}
+          </button>
+
+          {renderFolderOptions(folder.id, level + 1)}
+        </div>
+      ));
+  }
+
   function executeCommandItem(item: (typeof commandItems)[number]) {
     if (!item) return;
     if (item.type === "view") {
@@ -1407,6 +1441,20 @@ export default function DashboardPage() {
     window.addEventListener("keydown", handleCommandNav);
     return () => window.removeEventListener("keydown", handleCommandNav);
   }, [isCommandOpen, commandItems, commandActiveIndex]);
+
+  useEffect(() => {
+    function handleClickOutside() {
+      setShowMoveMenu(false);
+    }
+
+    if (showMoveMenu) {
+      window.addEventListener("click", handleClickOutside);
+    }
+
+    return () => {
+      window.removeEventListener("click", handleClickOutside);
+    };
+  }, [showMoveMenu]);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -1850,7 +1898,7 @@ export default function DashboardPage() {
 
       {selectedIds.length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-          <div className="flex items-center gap-4 rounded-xl bg-gray-900 text-white px-6 py-3 shadow-lg">
+          <div className="relative flex items-center gap-4 rounded-xl bg-gray-900 text-white px-6 py-3 shadow-lg">
             <span className="text-sm">{selectedIds.length} selected</span>
             {selectedIds.length === filteredScreenshots.length &&
               filteredScreenshots.length > 0 && (
@@ -1863,6 +1911,17 @@ export default function DashboardPage() {
               className="text-sm underline"
             >
               Add Attribute
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMoveMenu((prev) => !prev);
+              }}
+              className="text-sm underline"
+            >
+              Move To ▾
             </button>
 
             <button
@@ -1884,6 +1943,15 @@ export default function DashboardPage() {
               Clear
             </button>
           </div>
+
+          {showMoveMenu && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute bottom-14 left-1/2 z-50 max-h-80 w-64 -translate-x-1/2 overflow-y-auto rounded-xl border border-gray-200 bg-white text-gray-800 shadow-lg"
+            >
+              <div className="space-y-1 p-2">{renderFolderOptions(null, 0)}</div>
+            </div>
+          )}
         </div>
       )}
 
