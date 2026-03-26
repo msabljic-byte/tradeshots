@@ -347,6 +347,10 @@ export default function DashboardPage() {
         e.preventDefault();
         setIsCommandOpen((prev) => !prev);
       }
+
+      if (e.key === "Escape") {
+        setIsCommandOpen(false);
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1069,334 +1073,346 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-7xl px-6 py-6 font-sans">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-900">TradeShots</h1>
-          <div className="flex items-center gap-3">
-            <div className="profile-menu relative">
+    <div className="flex h-screen bg-gray-50">
+      <div className="flex w-64 flex-col border-r border-gray-200 bg-white p-4">
+        <h1 className="mb-6 text-lg font-semibold text-gray-900">TradeShots</h1>
+
+        <div className="space-y-1">
+          <button className="w-full rounded-lg bg-gray-900 px-3 py-2 text-left text-sm text-white">
+            All Screenshots
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
+          <div className="w-full max-w-md">
             <button
               type="button"
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-gray-700 transition hover:bg-gray-300"
+              onClick={() => setIsCommandOpen(true)}
+              className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-500 transition hover:bg-gray-50"
             >
-              👤
+              <span>Search or jump to…</span>
+              <span className="text-xs text-gray-400">Ctrl + K</span>
             </button>
+          </div>
 
-            {isProfileOpen && (
-              <div className="absolute right-0 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
-                <p className="mb-2 text-sm text-gray-900">{email ?? ""}</p>
+          <div className="ml-4 flex items-center gap-3">
+            <div className="profile-menu relative">
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-200 text-gray-700 transition hover:bg-gray-300"
+              >
+                👤
+              </button>
 
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  disabled={signingOut}
-                  className="w-full rounded px-2 py-1 text-left text-sm text-red-600 transition hover:bg-gray-100 disabled:opacity-60"
-                >
-                  {signingOut ? "Signing out…" : "Log out"}
-                </button>
-              </div>
-            )}
+              {isProfileOpen && (
+                <div className="absolute right-0 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+                  <p className="mb-2 text-sm text-gray-900">{email ?? ""}</p>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    disabled={signingOut}
+                    className="w-full rounded px-2 py-1 text-left text-sm text-red-600 transition hover:bg-gray-100 disabled:opacity-60"
+                  >
+                    {signingOut ? "Signing out…" : "Log out"}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {error && (
-          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
+        <div className="flex-1 overflow-y-auto p-6 font-sans">
+          {error && (
+            <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <div className="mb-6">
+            <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
           </div>
-        )}
 
-        <div className="mb-6">
-          <h2 className="text-2xl font-semibold text-gray-900">Your Screenshots</h2>
-        </div>
-
-        <div className="mb-6">
-          <ScreenshotUploader onUploadComplete={fetchScreenshots} />
-        </div>
-
-        {screenshots.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <p className="text-lg font-medium text-gray-900">No screenshots yet</p>
-            <p className="mt-2 text-sm text-gray-600">
-              Upload your first trade to get started
-            </p>
+          <div className="mb-6">
+            <ScreenshotUploader onUploadComplete={fetchScreenshots} />
           </div>
-        ) : (
-          <>
-            <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-              <button
-                type="button"
-                onClick={() => setIsCommandOpen(true)}
-                className="mb-4 flex w-full max-w-md items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-500 transition hover:bg-gray-50"
-              >
-                <span>Search or jump to…</span>
-                <span className="text-xs text-gray-400">Ctrl + K</span>
-              </button>
 
-              <div className="mb-4 flex items-center gap-2">
-                <input
-                  value={viewName}
-                  onChange={(e) => setViewName(e.target.value)}
-                  placeholder="View name"
-                  className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900"
-                />
+          {screenshots.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <p className="text-lg font-medium text-gray-900">No screenshots yet</p>
+              <p className="mt-2 text-sm text-gray-600">
+                Upload your first trade to get started
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                <div className="mb-4 flex items-center gap-2">
+                  <input
+                    value={viewName}
+                    onChange={(e) => setViewName(e.target.value)}
+                    placeholder="View name"
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  />
 
-                <button
-                  type="button"
-                  onClick={() => void handleSaveView()}
-                  className="rounded-lg bg-gray-900 px-3 py-1 text-sm text-white"
-                >
-                  Save View
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveView()}
+                    className="rounded-lg bg-gray-900 px-3 py-1 text-sm text-white"
+                  >
+                    Save View
+                  </button>
+                </div>
 
-              <div className="mb-4 flex flex-wrap gap-2">
-                {savedViews.map((view) => (
-                  <div key={view.id} className="group flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => applyView(view)}
-                      className={`
-                        rounded-full px-3 py-1 text-sm transition
-                        ${activeViewId === view.id
-                          ? "bg-gray-900 text-white"
-                          : "bg-gray-100 text-gray-800 hover:bg-gray-200"
-                        }
-                      `}
-                    >
-                      {view.name}
-                    </button>
-
-                    <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {savedViews.map((view) => (
+                    <div key={view.id} className="group flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          const newName = prompt("Rename view", view.name);
-                          if (newName) {
-                            void renameView(view.id, newName);
+                        onClick={() => applyView(view)}
+                        className={`
+                          rounded-full px-3 py-1 text-sm transition
+                          ${activeViewId === view.id
+                            ? "bg-gray-900 text-white"
+                            : "bg-gray-100 text-gray-800 hover:bg-gray-200"
                           }
-                        }}
-                        className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-gray-900"
+                        `}
                       >
-                        ✏
+                        {view.name}
                       </button>
 
+                      <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newName = prompt("Rename view", view.name);
+                            if (newName) {
+                              void renameView(view.id, newName);
+                            }
+                          }}
+                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-gray-900"
+                        >
+                          ✏
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void deleteView(view.id)}
+                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-red-600"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <input
+                  type="text"
+                  value={tagFilter}
+                  onChange={(e) => setTagFilter(e.target.value)}
+                  placeholder="Filter by tag..."
+                  className="mb-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFilterMenu(true);
+                      setSelectedKey("");
+                      setSearchTerm("");
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition hover:bg-gray-100"
+                  >
+                    + Add Filter
+                  </button>
+
+                  {filters.map((f, index) => (
+                    <div
+                      key={`${f.key}-${f.value}-${index}`}
+                      className="flex items-center gap-2 rounded-full bg-gray-900 px-3 py-1 text-sm text-white"
+                    >
+                      <span className="font-medium">
+                        {f.key}: {f.value}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => void deleteView(view.id)}
-                        className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-red-600"
+                        onClick={() => removeFilter(index)}
+                        className="text-white/70 transition hover:text-white"
+                        aria-label="Remove filter"
                       >
                         ✕
                       </button>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
 
-              <input
-                type="text"
-                value={tagFilter}
-                onChange={(e) => setTagFilter(e.target.value)}
-                placeholder="Filter by tag..."
-                className="mb-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300"
-              />
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowFilterMenu(true);
-                    setSelectedKey("");
-                    setSearchTerm("");
-                  }}
-                  className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition hover:bg-gray-100"
-                >
-                  + Add Filter
-                </button>
-
-                {filters.map((f, index) => (
+                {showFilterMenu && (
                   <div
-                    key={`${f.key}-${f.value}-${index}`}
-                    className="flex items-center gap-2 rounded-full bg-gray-900 px-3 py-1 text-sm text-white"
+                    className="fixed inset-0 z-[200] flex cursor-pointer items-start justify-center bg-black/40 pt-32"
+                    onClick={() => setShowFilterMenu(false)}
                   >
-                    <span className="font-medium">
-                      {f.key}: {f.value}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeFilter(index)}
-                      className="text-white/70 transition hover:text-white"
-                      aria-label="Remove filter"
+                    <div
+                      className="w-full max-w-md cursor-default rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
+                      <input
+                        autoFocus
+                        placeholder={
+                          selectedKey ? "Search value..." : "Search attribute..."
+                        }
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder:text-gray-500 outline-none"
+                      />
 
-              {showFilterMenu && (
-                <div
-                  className="fixed inset-0 z-[200] flex cursor-pointer items-start justify-center bg-black/40 pt-32"
-                  onClick={() => setShowFilterMenu(false)}
-                >
-                  <div
-                    className="w-full max-w-md cursor-default rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      autoFocus
-                      placeholder={
-                        selectedKey ? "Search value..." : "Search attribute..."
-                      }
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder:text-gray-500 outline-none"
-                    />
-
-                    <div className="mt-2 max-h-60 overflow-y-auto">
-                      {!selectedKey ? (
-                        filteredKeys.length === 0 ? (
+                      <div className="mt-2 max-h-60 overflow-y-auto">
+                        {!selectedKey ? (
+                          filteredKeys.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-gray-500">
+                              No results found
+                            </div>
+                          ) : (
+                            filteredKeys.map((key) => (
+                              <div
+                                key={key}
+                                onClick={() => {
+                                  setSelectedKey(key);
+                                  setSearchTerm("");
+                                }}
+                                className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 transition hover:bg-gray-100"
+                              >
+                                {key}
+                              </div>
+                            ))
+                          )
+                        ) : filteredValues.length === 0 ? (
                           <div className="px-3 py-2 text-sm text-gray-500">
                             No results found
                           </div>
                         ) : (
-                          filteredKeys.map((key) => (
+                          filteredValues.map((value) => (
                             <div
-                              key={key}
-                              onClick={() => {
-                                setSelectedKey(key);
-                                setSearchTerm("");
-                              }}
+                              key={value}
+                              onClick={() => addFilter(selectedKey, value)}
                               className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 transition hover:bg-gray-100"
                             >
-                              {key}
+                              {value}
                             </div>
                           ))
-                        )
-                      ) : filteredValues.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-gray-500">
-                          No results found
-                        </div>
-                      ) : (
-                        filteredValues.map((value) => (
-                          <div
-                            key={value}
-                            onClick={() => addFilter(selectedKey, value)}
-                            className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 transition hover:bg-gray-100"
-                          >
-                            {value}
-                          </div>
-                        ))
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
+
+              {filteredScreenshots.length === 0 ? (
+                <div className="py-12">
+                  <p className="text-lg font-semibold text-gray-900">
+                    No matching screenshots
+                  </p>
+                  <p className="mt-2 text-sm text-gray-600">
+                    Try adjusting tags or filters
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+                  {filteredScreenshots.map((shot, index) => (
+                    <div
+                      key={shot.id}
+                      title="Ctrl + Click to select multiple"
+                      onClick={(e) => {
+                        const isMulti = e.ctrlKey || e.metaKey;
+                        const isShift = e.shiftKey;
+
+                        if (isShift && lastSelectedIndex !== null) {
+                          const start = Math.min(lastSelectedIndex, index);
+                          const end = Math.max(lastSelectedIndex, index);
+
+                          const rangeIds = filteredScreenshots
+                            .slice(start, end + 1)
+                            .map((s) => s.id);
+
+                          setSelectedIds((prev) => [
+                            ...new Set([...prev, ...rangeIds]),
+                          ]);
+                          setLastSelectedIndex(index);
+                          return;
+                        }
+
+                        if (isMulti) {
+                          e.preventDefault();
+                          setSelectedIds((prev) =>
+                            prev.includes(shot.id)
+                              ? prev.filter((id) => id !== shot.id)
+                              : [...prev, shot.id]
+                          );
+                          setLastSelectedIndex(index);
+                          return;
+                        }
+
+                        setSelectedIndex(index);
+                      }}
+                      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md ${
+                        selectedIds.length > 0 ? "cursor-pointer" : ""
+                      } ${
+                        selectedIds.includes(shot.id)
+                          ? "ring-2 ring-gray-900 scale-[0.98]"
+                          : ""
+                      }`}
+                    >
+                      {selectedIds.includes(shot.id) && (
+                        <div className="absolute top-2 left-2 rounded bg-white p-1 shadow">
+                          ✓
+                        </div>
+                      )}
+                      <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+                        <img
+                          src={shot.image_url}
+                          alt="Uploaded screenshot"
+                          onLoad={() => handleImageLoaded(shot.id)}
+                          className={`h-48 w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] ${
+                            loadedImages[shot.id] ? "opacity-100" : "opacity-0"
+                          }`}
+                        />
+                        <div className="pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover:bg-black/10" />
+                        <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                          View
+                        </div>
+                      </div>
+
+                      <div className="flex min-h-[3.5rem] flex-grow flex-col justify-center px-3 py-3">
+                        {shot.tags && shot.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {shot.tags?.map((tag, i) => (
+                              <span
+                                key={`${shot.id}-${tag}-${i}`}
+                                className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {selectedIds.length === 0 && (
+                        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200">
+                          <div className="whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-lg">
+                            {multiSelectHint}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
-            </div>
-
-            {filteredScreenshots.length === 0 ? (
-              <div className="py-12">
-                <p className="text-lg font-semibold text-gray-900">
-                  No matching screenshots
-                </p>
-                <p className="mt-2 text-sm text-gray-600">
-                  Try adjusting tags or filters
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-                {filteredScreenshots.map((shot, index) => (
-                  <div
-                    key={shot.id}
-                    title="Ctrl + Click to select multiple"
-                    onClick={(e) => {
-                      const isMulti = e.ctrlKey || e.metaKey;
-                      const isShift = e.shiftKey;
-
-                      if (isShift && lastSelectedIndex !== null) {
-                        const start = Math.min(lastSelectedIndex, index);
-                        const end = Math.max(lastSelectedIndex, index);
-
-                        const rangeIds = filteredScreenshots
-                          .slice(start, end + 1)
-                          .map((s) => s.id);
-
-                        setSelectedIds((prev) => [
-                          ...new Set([...prev, ...rangeIds]),
-                        ]);
-                        setLastSelectedIndex(index);
-                        return;
-                      }
-
-                      if (isMulti) {
-                        e.preventDefault();
-                        setSelectedIds((prev) =>
-                          prev.includes(shot.id)
-                            ? prev.filter((id) => id !== shot.id)
-                            : [...prev, shot.id]
-                        );
-                        setLastSelectedIndex(index);
-                        return;
-                      }
-
-                      setSelectedIndex(index);
-                    }}
-                    className={`group relative flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md ${
-                      selectedIds.length > 0 ? "cursor-pointer" : ""
-                    } ${
-                      selectedIds.includes(shot.id)
-                        ? "ring-2 ring-gray-900 scale-[0.98]"
-                        : ""
-                    }`}
-                  >
-                    {selectedIds.includes(shot.id) && (
-                      <div className="absolute top-2 left-2 rounded bg-white p-1 shadow">
-                        ✓
-                      </div>
-                    )}
-                    <div className="relative h-48 w-full overflow-hidden bg-gray-100">
-                      <img
-                        src={shot.image_url}
-                        alt="Uploaded screenshot"
-                        onLoad={() => handleImageLoaded(shot.id)}
-                        className={`h-48 w-full object-cover transition-transform duration-300 group-hover:scale-[1.02] ${
-                          loadedImages[shot.id] ? "opacity-100" : "opacity-0"
-                        }`}
-                      />
-                      <div className="pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover:bg-black/10" />
-                      <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                        View
-                      </div>
-                    </div>
-
-                    <div className="flex min-h-[3.5rem] flex-grow flex-col justify-center px-3 py-3">
-                      {shot.tags && shot.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {shot.tags?.map((tag, i) => (
-                            <span
-                              key={`${shot.id}-${tag}-${i}`}
-                              className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {selectedIds.length === 0 && (
-                      <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200">
-                        <div className="whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-lg">
-                          {multiSelectHint}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {selectedIds.length > 0 && (
@@ -1858,8 +1874,14 @@ export default function DashboardPage() {
         )}
 
       {isCommandOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/40 pt-32">
-          <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+        <div
+          className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/40 pt-32"
+          onClick={() => setIsCommandOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xl rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden"
+          >
             <input
               autoFocus
               value={commandQuery}
