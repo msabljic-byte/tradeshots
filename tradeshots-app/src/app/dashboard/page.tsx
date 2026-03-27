@@ -234,6 +234,7 @@ export default function DashboardPage() {
   } | null>(null);
   const [savingAttributes, setSavingAttributes] = useState(false);
   const [savedAttributesToast, setSavedAttributesToast] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -266,6 +267,7 @@ export default function DashboardPage() {
   const isDraggingAnnotationRef = useRef(false);
   const dragStartPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragStartShapeRef = useRef<AnnotationShape | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
 
   const multiSelectHint = isMacPlatform
       ? "⌘ to select • ⇧ to select range"
@@ -273,6 +275,17 @@ export default function DashboardPage() {
 
   function handleImageLoaded(id: string) {
     setLoadedImages((prev) => ({ ...prev, [id]: true }));
+  }
+
+  function showToast(message: string) {
+    setToast(message);
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimeoutRef.current = null;
+    }, 2000);
   }
 
   function addFilter(key: string, value: string) {
@@ -501,6 +514,41 @@ export default function DashboardPage() {
 
   function getFolderCount(folderId: string) {
     return allScreenshots.filter((s: any) => s.folder_id === folderId).length;
+  }
+
+  function generateShareId() {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID().slice(0, 8);
+    }
+
+    return Math.random().toString(36).substring(2, 10);
+  }
+
+  async function handleShareFolder(folder: any) {
+    let shareId = String(folder?.share_id ?? "");
+
+    if (!shareId) {
+      shareId = generateShareId();
+      const { error: shareError } = await supabase
+        .from("folders")
+        .update({ share_id: shareId })
+        .eq("id", folder.id);
+
+      if (shareError) {
+        setError(
+          shareError.message.toLowerCase().includes("share_id")
+            ? "folders.share_id column is missing. Please run DB migration to enable sharing."
+            : shareError.message
+        );
+        return;
+      }
+
+      await fetchFolders();
+    }
+
+    const url = `${window.location.origin}/playbook/${shareId}`;
+    await navigator.clipboard.writeText(url);
+    showToast("Link copied ✓");
   }
 
   async function handleSaveView() {
@@ -1986,6 +2034,20 @@ export default function DashboardPage() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    void handleShareFolder(folder);
+                  }}
+                  className={`text-sm ${
+                    isActive ? "text-white/80 hover:text-white" : "text-gray-400 hover:text-gray-700"
+                  }`}
+                  title="Copy public link"
+                >
+                  🔗
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
                     void renameFolder(folder.id, folder.name);
                   }}
                   className={`text-sm ${
@@ -2487,6 +2549,14 @@ export default function DashboardPage() {
       window.removeEventListener("click", handleClickOutside);
     };
   }, [showMoveMenu]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -3050,6 +3120,12 @@ export default function DashboardPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="animate-fade-in fixed bottom-6 left-1/2 z-[9999] -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
+          {toast}
         </div>
       )}
 
