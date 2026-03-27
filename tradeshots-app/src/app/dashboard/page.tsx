@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
@@ -12,7 +12,127 @@ type ScreenshotRow = {
   created_at: string;
   tags?: string[] | null;
   notes?: string | null;
+  folder_id?: string | null;
+  annotation?: unknown; // legacy
+  annotations?: unknown; // structured JSON (preferred)
 };
+
+type AnnotationShape =
+  | {
+      id: string;
+      kind: "path";
+      color: string;
+      size: number;
+      points: Array<{ x: number; y: number }>;
+    }
+  | {
+      id: string;
+      kind: "arrow";
+      color: string;
+      size: number;
+      fromX: number;
+      fromY: number;
+      toX: number;
+      toY: number;
+    }
+  | {
+      id: string;
+      kind: "text";
+      color: string;
+      size: number;
+      x: number;
+      y: number;
+      text: string;
+    }
+  | {
+      id: string;
+      kind: "highlight";
+      color: string;
+      size: number;
+      opacity: number;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+function parseAnnotationValue(raw: unknown): {
+  image: string;
+  shapes: AnnotationShape[];
+} {
+  if (raw == null) return { image: "", shapes: [] };
+
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (!value) return { image: "", shapes: [] };
+    if (value.startsWith("data:image/")) {
+      return { image: value, shapes: [] };
+    }
+    try {
+      return parseAnnotationValue(JSON.parse(value));
+    } catch {
+      return { image: value, shapes: [] };
+    }
+  }
+
+  if (typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const image = typeof obj.image === "string" ? obj.image : "";
+    const shapesRaw = Array.isArray(obj.shapes)
+      ? (obj.shapes as AnnotationShape[])
+      : [];
+    const shapes = shapesRaw.map((shape) => {
+      if (shape.kind !== "highlight") return shape;
+      return {
+        ...shape,
+        opacity:
+          typeof (shape as any).opacity === "number"
+            ? Math.max(0.05, Math.min(1, (shape as any).opacity))
+            : 0.18,
+      } as AnnotationShape;
+    });
+    // If serialized twice, decode nested payload too.
+    if (!image && !shapes.length && typeof obj.annotation === "string") {
+      return parseAnnotationValue(obj.annotation);
+    }
+    if (!image && !shapes.length && obj.annotations != null) {
+      return parseAnnotationValue(obj.annotations);
+    }
+    return { image, shapes };
+  }
+
+  return { image: "", shapes: [] };
+}
+
+const LOCAL_ANNOTATIONS_KEY = "tradeshots.localAnnotations.v1";
+
+function readLocalAnnotations(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(LOCAL_ANNOTATIONS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalAnnotation(screenshotId: string, annotationPayload: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const existing = readLocalAnnotations();
+    existing[screenshotId] = annotationPayload;
+    window.localStorage.setItem(LOCAL_ANNOTATIONS_KEY, JSON.stringify(existing));
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+function getLocalAnnotation(screenshotId: string): string | null {
+  const existing = readLocalAnnotations();
+  return existing[screenshotId] ?? null;
+}
 
 /** Normalize rows from Supabase (column names vary by schema / PostgREST) */
 function parseTradeAttributeRow(
@@ -118,6 +238,34 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isMacPlatform, setIsMacPlatform] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [tool, setTool] = useState<
+    "select" | "draw" | "arrow" | "text" | "highlight"
+  >("draw");
+  const [strokeColor, setStrokeColor] = useState("#ef4444");
+  const [strokeSize, setStrokeSize] = useState(3);
+  const [highlightOpacity, setHighlightOpacity] = useState(0.18);
+  const [textDraft, setTextDraft] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
+  const [annotationHistory, setAnnotationHistory] = useState<AnnotationShape[][]>([]);
+  const [annotationHistoryIndex, setAnnotationHistoryIndex] = useState(-1);
+  const [annotationShapes, setAnnotationShapes] = useState<AnnotationShape[]>([]);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
+  const [isDraggingAnnotation, setIsDraggingAnnotation] = useState(false);
+  const [annotationBaseDataUrl, setAnnotationBaseDataUrl] = useState("");
+  const [savingAnnotation, setSavingAnnotation] = useState(false);
+  const drawStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const currentPathRef = useRef<Array<{ x: number; y: number }>>([]);
+  const isDrawingRef = useRef(false);
+  const isDraggingAnnotationRef = useRef(false);
+  const dragStartPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragStartShapeRef = useRef<AnnotationShape | null>(null);
 
   const multiSelectHint = isMacPlatform
       ? "⌘ to select • ⇧ to select range"
@@ -165,13 +313,46 @@ export default function DashboardPage() {
       return;
     }
 
-    const { data, error: screenshotsError } = await supabase
+    const initial = await supabase
       .from("screenshots")
-      .select("id, image_url, created_at, tags, notes, folder_id")
+      .select("id, image_url, created_at, tags, notes, folder_id, annotations, annotation")
       .eq("user_id", user.id)
       .order("created_at", {
-      ascending: false,
-    });
+        ascending: false,
+      });
+    let data: any[] | null = initial.data as any[] | null;
+    let screenshotsError = initial.error;
+
+    // Graceful fallback for databases that don't yet have `annotations`/`annotation` columns.
+    if (
+      screenshotsError &&
+      (screenshotsError.message.toLowerCase().includes("annotations") ||
+        screenshotsError.message.toLowerCase().includes("annotation"))
+    ) {
+      const fallbackLegacy = await supabase
+        .from("screenshots")
+        .select("id, image_url, created_at, tags, notes, folder_id, annotation")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      data = fallbackLegacy.data;
+      screenshotsError = fallbackLegacy.error;
+    }
+
+    // Final fallback when neither annotation column exists.
+    if (
+      screenshotsError &&
+      screenshotsError.message.toLowerCase().includes("annotation")
+    ) {
+      const fallbackBase = await supabase
+        .from("screenshots")
+        .select("id, image_url, created_at, tags, notes, folder_id")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      data = fallbackBase.data;
+      screenshotsError = fallbackBase.error;
+    }
 
     if (screenshotsError) {
       setError(screenshotsError.message);
@@ -181,11 +362,22 @@ export default function DashboardPage() {
     } else {
       setError(null);
       const allRows = (data ?? []) as any[];
-      setAllScreenshots(allRows);
+      const hydratedRows = allRows.map((row) => {
+        const sid = String(row?.id ?? "");
+        if (!sid) return row;
+        const local = getLocalAnnotation(sid);
+        if (!local) return row;
+        return {
+          ...row,
+          annotations: local,
+          annotation: local,
+        };
+      });
+      setAllScreenshots(hydratedRows);
 
       const screenshotRows = (activeFolderId
-        ? allRows.filter((s) => s.folder_id === activeFolderId)
-        : allRows) as ScreenshotRow[];
+        ? hydratedRows.filter((s) => s.folder_id === activeFolderId)
+        : hydratedRows) as ScreenshotRow[];
       setScreenshots(screenshotRows);
 
       const screenshotIds = screenshotRows.map((s) => s.id);
@@ -1209,6 +1401,456 @@ export default function DashboardPage() {
     await fetchScreenshots();
   }
 
+  function pushShapesHistory(nextShapes: AnnotationShape[]) {
+    setAnnotationHistory((prev) => {
+      const trimmed = prev.slice(0, annotationHistoryIndex + 1);
+      const snapshot = nextShapes.map((s) => JSON.parse(JSON.stringify(s)));
+      const next = [...trimmed, snapshot];
+      setAnnotationHistoryIndex(next.length - 1);
+      return next;
+    });
+  }
+
+  function applyShapes(nextShapes: AnnotationShape[], options?: { pushHistory?: boolean }) {
+    setAnnotationShapes(nextShapes);
+    if (options?.pushHistory !== false) {
+      pushShapesHistory(nextShapes);
+    }
+  }
+
+  function translateShape(shape: AnnotationShape, dx: number, dy: number): AnnotationShape {
+    if (shape.kind === "path") {
+      return {
+        ...shape,
+        points: shape.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+      };
+    }
+    if (shape.kind === "arrow") {
+      return {
+        ...shape,
+        fromX: shape.fromX + dx,
+        fromY: shape.fromY + dy,
+        toX: shape.toX + dx,
+        toY: shape.toY + dy,
+      };
+    }
+    if (shape.kind === "text") {
+      return { ...shape, x: shape.x + dx, y: shape.y + dy };
+    }
+    return { ...shape, x: shape.x + dx, y: shape.y + dy };
+  }
+
+  function drawArrowShape(
+    ctx: CanvasRenderingContext2D,
+    shape: Extract<AnnotationShape, { kind: "arrow" }>
+  ) {
+    const distance = Math.hypot(shape.toX - shape.fromX, shape.toY - shape.fromY);
+    const headLength = Math.max(8, Math.min(24, distance * 0.2));
+    const angle = Math.atan2(shape.toY - shape.fromY, shape.toX - shape.fromX);
+    ctx.strokeStyle = shape.color;
+    ctx.lineWidth = shape.size;
+    ctx.beginPath();
+    ctx.moveTo(shape.fromX, shape.fromY);
+    ctx.lineTo(shape.toX, shape.toY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(shape.toX, shape.toY);
+    ctx.lineTo(
+      shape.toX - headLength * Math.cos(angle - Math.PI / 6),
+      shape.toY - headLength * Math.sin(angle - Math.PI / 6)
+    );
+    ctx.lineTo(
+      shape.toX - headLength * Math.cos(angle + Math.PI / 6),
+      shape.toY - headLength * Math.sin(angle + Math.PI / 6)
+    );
+    ctx.lineTo(shape.toX, shape.toY);
+    ctx.fillStyle = shape.color;
+    ctx.fill();
+  }
+
+  function drawHighlightShape(
+    ctx: CanvasRenderingContext2D,
+    shape: Extract<AnnotationShape, { kind: "highlight" }>
+  ) {
+    const x = shape.width >= 0 ? shape.x : shape.x + shape.width;
+    const y = shape.height >= 0 ? shape.y : shape.y + shape.height;
+    const w = Math.abs(shape.width);
+    const h = Math.abs(shape.height);
+    if (w < 1 || h < 1) return;
+
+    ctx.save();
+    // Marker-like translucent fill so image remains visible underneath.
+    ctx.fillStyle = shape.color;
+    ctx.globalAlpha = Math.max(0.05, Math.min(1, shape.opacity ?? 0.18));
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = shape.color;
+    ctx.lineWidth = Math.max(1, shape.size);
+    ctx.globalAlpha = 0.9;
+    ctx.strokeRect(x, y, w, h);
+    ctx.restore();
+  }
+
+  function drawShapes(
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    shapes: AnnotationShape[],
+    selectedId: string | null
+  ) {
+    for (const shape of shapes) {
+      if (shape.kind === "path") {
+        if (shape.points.length < 2) continue;
+        ctx.strokeStyle = shape.color;
+        ctx.lineWidth = shape.size;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(shape.points[0].x, shape.points[0].y);
+        for (let i = 1; i < shape.points.length; i++) {
+          ctx.lineTo(shape.points[i].x, shape.points[i].y);
+        }
+        ctx.stroke();
+      } else if (shape.kind === "arrow") {
+        drawArrowShape(ctx, shape);
+      } else if (shape.kind === "highlight") {
+        drawHighlightShape(ctx, shape);
+      } else if (shape.kind === "text") {
+        const fontSize = Math.max(14, 12 + shape.size * 2);
+        ctx.fillStyle = shape.color;
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.textBaseline = "top";
+        ctx.fillText(shape.text, shape.x, shape.y);
+      }
+
+      if (selectedId && shape.id === selectedId) {
+        let minX = 0;
+        let minY = 0;
+        let maxX = 0;
+        let maxY = 0;
+        if (shape.kind === "path") {
+          const xs = shape.points.map((p) => p.x);
+          const ys = shape.points.map((p) => p.y);
+          minX = Math.min(...xs);
+          minY = Math.min(...ys);
+          maxX = Math.max(...xs);
+          maxY = Math.max(...ys);
+        } else if (shape.kind === "arrow") {
+          minX = Math.min(shape.fromX, shape.toX);
+          minY = Math.min(shape.fromY, shape.toY);
+          maxX = Math.max(shape.fromX, shape.toX);
+          maxY = Math.max(shape.fromY, shape.toY);
+        } else if (shape.kind === "text") {
+          const fontSize = Math.max(14, 12 + shape.size * 2);
+          const width = Math.max(fontSize, ctx.measureText(shape.text).width);
+          minX = shape.x;
+          minY = shape.y;
+          maxX = shape.x + width;
+          maxY = shape.y + fontSize;
+        } else {
+          minX = Math.min(shape.x, shape.x + shape.width);
+          minY = Math.min(shape.y, shape.y + shape.height);
+          maxX = Math.max(shape.x, shape.x + shape.width);
+          maxY = Math.max(shape.y, shape.y + shape.height);
+        }
+        const pad = 8;
+        ctx.save();
+        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        const boxX = Math.max(0, minX - pad);
+        const boxY = Math.max(0, minY - pad);
+        const boxW = Math.min(canvas.width, maxX - minX + pad * 2);
+        const boxH = Math.min(canvas.height, maxY - minY + pad * 2);
+        ctx.strokeRect(boxX, boxY, boxW, boxH);
+        ctx.setLineDash([]);
+        // Small corner handles as a move affordance.
+        const handle = 6;
+        const corners: Array<{ x: number; y: number }> = [
+          { x: boxX, y: boxY },
+          { x: boxX + boxW, y: boxY },
+          { x: boxX, y: boxY + boxH },
+          { x: boxX + boxW, y: boxY + boxH },
+        ];
+        ctx.fillStyle = "#2563eb";
+        for (const corner of corners) {
+          ctx.fillRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle);
+        }
+        ctx.fillStyle = "#ffffff";
+        for (const corner of corners) {
+          ctx.fillRect(corner.x - 1.5, corner.y - 1.5, 3, 3);
+        }
+        ctx.restore();
+      } else if (hoveredAnnotationId && shape.id === hoveredAnnotationId) {
+        let minX = 0;
+        let minY = 0;
+        let maxX = 0;
+        let maxY = 0;
+        if (shape.kind === "path") {
+          const xs = shape.points.map((p) => p.x);
+          const ys = shape.points.map((p) => p.y);
+          minX = Math.min(...xs);
+          minY = Math.min(...ys);
+          maxX = Math.max(...xs);
+          maxY = Math.max(...ys);
+        } else if (shape.kind === "arrow") {
+          minX = Math.min(shape.fromX, shape.toX);
+          minY = Math.min(shape.fromY, shape.toY);
+          maxX = Math.max(shape.fromX, shape.toX);
+          maxY = Math.max(shape.fromY, shape.toY);
+        } else if (shape.kind === "text") {
+          const fontSize = Math.max(14, 12 + shape.size * 2);
+          const width = Math.max(fontSize, ctx.measureText(shape.text).width);
+          minX = shape.x;
+          minY = shape.y;
+          maxX = shape.x + width;
+          maxY = shape.y + fontSize;
+        } else {
+          minX = Math.min(shape.x, shape.x + shape.width);
+          minY = Math.min(shape.y, shape.y + shape.height);
+          maxX = Math.max(shape.x, shape.x + shape.width);
+          maxY = Math.max(shape.y, shape.y + shape.height);
+        }
+        const pad = 6;
+        ctx.save();
+        ctx.strokeStyle = "#60a5fa";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(
+          Math.max(0, minX - pad),
+          Math.max(0, minY - pad),
+          Math.min(canvas.width, maxX - minX + pad * 2),
+          Math.min(canvas.height, maxY - minY + pad * 2)
+        );
+        ctx.restore();
+      }
+    }
+  }
+
+  function redrawCanvasWithShapes() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!annotationBaseDataUrl) {
+      drawShapes(ctx, canvas, annotationShapes, selectedAnnotationId);
+      return;
+    }
+    const img = new Image();
+    img.src = annotationBaseDataUrl;
+    img.onload = () => {
+      const nextCanvas = canvasRef.current;
+      if (!nextCanvas) return;
+      const nextCtx = nextCanvas.getContext("2d");
+      if (!nextCtx) return;
+      nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+      nextCtx.drawImage(img, 0, 0, nextCanvas.width, nextCanvas.height);
+      drawShapes(nextCtx, nextCanvas, annotationShapes, selectedAnnotationId);
+    };
+  }
+
+  function handleUndoAnnotation() {
+    if (annotationHistoryIndex <= 0) return;
+    const nextIndex = annotationHistoryIndex - 1;
+    const snapshot = annotationHistory[nextIndex];
+    if (!snapshot) return;
+    setAnnotationHistoryIndex(nextIndex);
+    setAnnotationShapes(snapshot.map((s) => JSON.parse(JSON.stringify(s))));
+    setSelectedAnnotationId(null);
+  }
+
+  function handleRedoAnnotation() {
+    if (annotationHistoryIndex < 0) return;
+    if (annotationHistoryIndex >= annotationHistory.length - 1) return;
+    const nextIndex = annotationHistoryIndex + 1;
+    const snapshot = annotationHistory[nextIndex];
+    if (!snapshot) return;
+    setAnnotationHistoryIndex(nextIndex);
+    setAnnotationShapes(snapshot.map((s) => JSON.parse(JSON.stringify(s))));
+    setSelectedAnnotationId(null);
+  }
+
+  function clearAnnotationCanvas() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    applyShapes([], { pushHistory: true });
+    setSelectedAnnotationId(null);
+  }
+
+  function applyTextDraft() {
+    if (!textDraft) return;
+    const text = textDraft.text.trim();
+    if (!text) {
+      setTextDraft(null);
+      return;
+    }
+
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    applyShapes(
+      [
+        ...annotationShapes,
+        {
+          id,
+          kind: "text",
+          x: textDraft.x,
+          y: textDraft.y,
+          text,
+          color: strokeColor,
+          size: strokeSize,
+        },
+      ],
+      { pushHistory: true }
+    );
+    setSelectedAnnotationId(null);
+    setTextDraft(null);
+  }
+
+  function deleteSelectedAnnotation() {
+    if (!selectedAnnotationId) return;
+    applyShapes(
+      annotationShapes.filter((shape) => shape.id !== selectedAnnotationId),
+      { pushHistory: true }
+    );
+    setSelectedAnnotationId(null);
+  }
+
+  async function exportMergedImage() {
+    if (!selectedImage) return;
+    const annotationCanvas = canvasRef.current;
+    if (!annotationCanvas) return;
+
+    setError(null);
+    try {
+      const baseImage = new Image();
+      baseImage.crossOrigin = "anonymous";
+      baseImage.src = selectedImage.image_url;
+      await new Promise<void>((resolve, reject) => {
+        baseImage.onload = () => resolve();
+        baseImage.onerror = () => reject(new Error("Failed to load base image"));
+      });
+
+      const mergedCanvas = document.createElement("canvas");
+      mergedCanvas.width = baseImage.naturalWidth || annotationCanvas.width;
+      mergedCanvas.height = baseImage.naturalHeight || annotationCanvas.height;
+      const mergedCtx = mergedCanvas.getContext("2d");
+      if (!mergedCtx) return;
+
+      mergedCtx.drawImage(baseImage, 0, 0, mergedCanvas.width, mergedCanvas.height);
+      if (annotationBaseDataUrl) {
+        const img = new Image();
+        img.src = annotationBaseDataUrl;
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error("Failed to render annotation base"));
+        });
+        mergedCtx.drawImage(img, 0, 0, mergedCanvas.width, mergedCanvas.height);
+      }
+      drawShapes(mergedCtx, mergedCanvas, annotationShapes, null);
+
+      const url = mergedCanvas.toDataURL("image/png");
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `tradeshot-${selectedImage.id}.png`;
+      link.click();
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to export merged image.");
+    }
+  }
+
+  async function saveAnnotation() {
+    if (!selectedImage?.id) return;
+
+    setSavingAnnotation(true);
+    try {
+      const payloadObject = {
+        version: 2,
+        // Keep editable shapes as source of truth.
+        // If shapes exist, do not keep a baked overlay image.
+        image: annotationShapes.length > 0 ? "" : annotationBaseDataUrl,
+        shapes: annotationShapes,
+      };
+      writeLocalAnnotation(selectedImage.id, JSON.stringify(payloadObject));
+
+      const { error: annotationError } = await supabase
+        .from("screenshots")
+        .update({ annotations: payloadObject })
+        .eq("id", selectedImage.id);
+
+      if (annotationError) {
+        const msg = annotationError.message.toLowerCase();
+        if (msg.includes("annotations")) {
+          // New column missing: attempt legacy column.
+          const payload = JSON.stringify(payloadObject);
+          const legacy = await supabase
+            .from("screenshots")
+            .update({ annotation: payload })
+            .eq("id", selectedImage.id);
+          if (!legacy.error) {
+            setError(null);
+            setScreenshots((prev) =>
+              prev.map((s) =>
+                s.id === selectedImage.id
+                  ? { ...s, annotations: payloadObject, annotation: payload }
+                  : s
+              )
+            );
+            setAllScreenshots((prev: any[]) =>
+              prev.map((s) =>
+                s.id === selectedImage.id
+                  ? { ...s, annotations: payloadObject, annotation: payload }
+                  : s
+              )
+            );
+            return;
+          }
+        }
+        if (msg.includes("annotation")) {
+          // Column missing: keep working with local fallback without showing blocking error.
+          setError(null);
+          setScreenshots((prev) =>
+            prev.map((s) =>
+              s.id === selectedImage.id
+                ? { ...s, annotations: payloadObject, annotation: payloadObject }
+                : s
+            )
+          );
+          setAllScreenshots((prev: any[]) =>
+            prev.map((s) =>
+              s.id === selectedImage.id
+                ? { ...s, annotations: payloadObject, annotation: payloadObject }
+                : s
+            )
+          );
+          return;
+        }
+        setError(
+          annotationError.message
+        );
+        return;
+      }
+
+      // Keep list data in sync without forcing a full refetch.
+      setScreenshots((prev) =>
+        prev.map((s) =>
+          s.id === selectedImage.id
+            ? { ...s, annotations: payloadObject, annotation: payloadObject }
+            : s
+        )
+      );
+      setAllScreenshots((prev: any[]) =>
+        prev.map((s) =>
+          s.id === selectedImage.id
+            ? { ...s, annotations: payloadObject, annotation: payloadObject }
+            : s
+        )
+      );
+    } finally {
+      setSavingAnnotation(false);
+    }
+  }
+
   async function moveToFolder(folderId: string) {
     if (!selectedIds.length) return;
 
@@ -1405,6 +2047,70 @@ export default function DashboardPage() {
     setIsCommandOpen(false);
   }
 
+  function distancePointToSegment(
+    px: number,
+    py: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number
+  ) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
+    const t = Math.max(
+      0,
+      Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy))
+    );
+    const cx = x1 + t * dx;
+    const cy = y1 + t * dy;
+    return Math.hypot(px - cx, py - cy);
+  }
+
+  function findShapeAtPoint(x: number, y: number): string | null {
+    for (let i = annotationShapes.length - 1; i >= 0; i--) {
+      const shape = annotationShapes[i];
+      if (shape.kind === "text") {
+        const size = Math.max(14, 12 + shape.size * 2);
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext("2d");
+        if (ctx) {
+          ctx.font = `${size}px sans-serif`;
+          const width = ctx.measureText(shape.text).width;
+          if (x >= shape.x && x <= shape.x + width && y >= shape.y && y <= shape.y + size) {
+            return shape.id;
+          }
+        }
+      } else if (shape.kind === "arrow") {
+        if (
+          distancePointToSegment(x, y, shape.fromX, shape.fromY, shape.toX, shape.toY) <=
+          Math.max(8, shape.size + 4)
+        ) {
+          return shape.id;
+        }
+      } else if (shape.kind === "highlight") {
+        const left = Math.min(shape.x, shape.x + shape.width);
+        const top = Math.min(shape.y, shape.y + shape.height);
+        const right = Math.max(shape.x, shape.x + shape.width);
+        const bottom = Math.max(shape.y, shape.y + shape.height);
+        const inside = x >= left && x <= right && y >= top && y <= bottom;
+        if (inside) return shape.id;
+      } else if (shape.kind === "path") {
+        for (let j = 1; j < shape.points.length; j++) {
+          const p1 = shape.points[j - 1];
+          const p2 = shape.points[j];
+          if (
+            distancePointToSegment(x, y, p1.x, p1.y, p2.x, p2.y) <=
+            Math.max(8, shape.size + 4)
+          ) {
+            return shape.id;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   useEffect(() => {
     if (!isCommandOpen) {
       setCommandActiveIndex(-1);
@@ -1456,6 +2162,317 @@ export default function DashboardPage() {
     window.addEventListener("keydown", handleCommandNav);
     return () => window.removeEventListener("keydown", handleCommandNav);
   }, [isCommandOpen, commandItems, commandActiveIndex]);
+
+  useEffect(() => {
+    if (!selectedImage) return;
+    const canvas = canvasRef.current;
+    const image = imageRef.current;
+    if (!canvas || !image) return;
+
+    const resize = () => {
+      const width = Math.max(1, Math.floor(image.clientWidth));
+      const height = Math.max(1, Math.floor(image.clientHeight));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    };
+
+    resize();
+    redrawCanvasWithShapes();
+
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [
+    selectedImage?.id,
+    isPanelOpen,
+    annotationBaseDataUrl,
+    annotationShapes,
+    selectedAnnotationId,
+  ]);
+
+  useEffect(() => {
+    if (!selectedImage) return;
+    const parsed = parseAnnotationValue(
+      selectedImage.annotations ?? selectedImage.annotation
+    );
+    const baseDataUrl = parsed.shapes.length > 0 ? "" : parsed.image;
+    const shapes = parsed.shapes;
+
+    setAnnotationBaseDataUrl(baseDataUrl);
+    setAnnotationShapes(shapes);
+    setAnnotationHistory([shapes.map((s) => JSON.parse(JSON.stringify(s)))]);
+    setAnnotationHistoryIndex(0);
+    setSelectedAnnotationId(null);
+    setHoveredAnnotationId(null);
+    setIsDraggingAnnotation(false);
+    setTextDraft(null);
+  }, [selectedImage?.id]);
+
+  useEffect(() => {
+    if (!selectedImage) return;
+    function handleDeleteKey(e: KeyboardEvent) {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (!selectedAnnotationId) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+      e.preventDefault();
+      deleteSelectedAnnotation();
+    }
+    window.addEventListener("keydown", handleDeleteKey);
+    return () => window.removeEventListener("keydown", handleDeleteKey);
+  }, [selectedImage?.id, selectedAnnotationId]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const canvasEl = canvas;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const context = ctx;
+
+    function getPoint(e: MouseEvent) {
+      const rect = canvasEl.getBoundingClientRect();
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+    }
+
+    function handleMouseDown(e: MouseEvent) {
+      const { x, y } = getPoint(e);
+      if (tool === "text") {
+        if (selectedAnnotationId !== null) {
+          setSelectedAnnotationId(null);
+        }
+        setTextDraft({ x, y, text: "" });
+        isDrawingRef.current = false;
+        setIsDrawing(false);
+        return;
+      }
+
+      if (tool === "select") {
+        const hitId = findShapeAtPoint(x, y);
+        setSelectedAnnotationId(hitId);
+        setHoveredAnnotationId(hitId);
+        if (hitId) {
+          const selected = annotationShapes.find((s) => s.id === hitId) ?? null;
+          if (selected) {
+            dragStartShapeRef.current = JSON.parse(JSON.stringify(selected));
+            dragStartPointRef.current = { x, y };
+            isDraggingAnnotationRef.current = true;
+            setIsDraggingAnnotation(true);
+          }
+        } else {
+          dragStartShapeRef.current = null;
+          isDraggingAnnotationRef.current = false;
+          setIsDraggingAnnotation(false);
+        }
+        isDrawingRef.current = false;
+        setIsDrawing(false);
+        return;
+      }
+
+      if (selectedAnnotationId !== null) {
+        setSelectedAnnotationId(null);
+      }
+
+      isDrawingRef.current = true;
+      setIsDrawing(true);
+      drawStartRef.current = { x, y };
+
+      if (tool === "draw") {
+        currentPathRef.current = [{ x, y }];
+      }
+
+    }
+
+    function handleMouseMove(e: MouseEvent) {
+      const { x, y } = getPoint(e);
+      if (tool === "select" && isDraggingAnnotationRef.current && selectedAnnotationId) {
+        const seed = dragStartShapeRef.current;
+        if (!seed) return;
+        const dx = x - dragStartPointRef.current.x;
+        const dy = y - dragStartPointRef.current.y;
+        setAnnotationShapes((prev) =>
+          prev.map((shape) =>
+            shape.id === selectedAnnotationId ? translateShape(seed, dx, dy) : shape
+          )
+        );
+        return;
+      }
+      if (tool === "select") {
+        const hitId = findShapeAtPoint(x, y);
+        setHoveredAnnotationId((prev) => (prev === hitId ? prev : hitId));
+        return;
+      }
+
+      if (!isDrawingRef.current) return;
+
+      if (tool === "draw") {
+        currentPathRef.current.push({ x, y });
+        redrawCanvasWithShapes();
+        context.strokeStyle = strokeColor;
+        context.lineWidth = strokeSize;
+        context.lineCap = "round";
+        context.beginPath();
+        context.moveTo(currentPathRef.current[0].x, currentPathRef.current[0].y);
+        for (let i = 1; i < currentPathRef.current.length; i++) {
+          context.lineTo(currentPathRef.current[i].x, currentPathRef.current[i].y);
+        }
+        context.stroke();
+      }
+
+      if (tool === "arrow") {
+        redrawCanvasWithShapes();
+        drawArrow(drawStartRef.current.x, drawStartRef.current.y, x, y);
+      }
+
+      if (tool === "highlight") {
+        redrawCanvasWithShapes();
+        const previewShape: Extract<AnnotationShape, { kind: "highlight" }> = {
+          id: "preview",
+          kind: "highlight",
+          color: strokeColor,
+          size: strokeSize,
+          opacity: highlightOpacity,
+          x: drawStartRef.current.x,
+          y: drawStartRef.current.y,
+          width: x - drawStartRef.current.x,
+          height: y - drawStartRef.current.y,
+        };
+        drawHighlightShape(context, previewShape);
+      }
+    }
+
+    function drawArrow(fromX: number, fromY: number, toX: number, toY: number) {
+      const distance = Math.hypot(toX - fromX, toY - fromY);
+      const headLength = Math.max(8, Math.min(24, distance * 0.2));
+      const angle = Math.atan2(toY - fromY, toX - fromX);
+      context.strokeStyle = strokeColor;
+      context.lineWidth = strokeSize;
+      context.beginPath();
+      context.moveTo(fromX, fromY);
+      context.lineTo(toX, toY);
+      context.stroke();
+
+      context.beginPath();
+      context.moveTo(toX, toY);
+      context.lineTo(
+        toX - headLength * Math.cos(angle - Math.PI / 6),
+        toY - headLength * Math.sin(angle - Math.PI / 6)
+      );
+      context.lineTo(
+        toX - headLength * Math.cos(angle + Math.PI / 6),
+        toY - headLength * Math.sin(angle + Math.PI / 6)
+      );
+      context.lineTo(toX, toY);
+      context.fillStyle = strokeColor;
+      context.fill();
+    }
+
+    function handleMouseUp(e: MouseEvent) {
+      if (tool === "select" && isDraggingAnnotationRef.current) {
+        isDraggingAnnotationRef.current = false;
+        setIsDraggingAnnotation(false);
+        dragStartShapeRef.current = null;
+        pushShapesHistory(annotationShapes);
+        return;
+      }
+
+      if (!isDrawingRef.current) return;
+      const { x, y } = getPoint(e);
+
+      if (tool === "draw" && currentPathRef.current.length > 1) {
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        applyShapes(
+          [
+            ...annotationShapes,
+            {
+              id,
+              kind: "path",
+              color: strokeColor,
+              size: strokeSize,
+              points: [...currentPathRef.current],
+            },
+          ],
+          { pushHistory: true }
+        );
+      }
+
+      if (tool === "arrow") {
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        applyShapes(
+          [
+            ...annotationShapes,
+            {
+              id,
+              kind: "arrow",
+              color: strokeColor,
+              size: strokeSize,
+              fromX: drawStartRef.current.x,
+              fromY: drawStartRef.current.y,
+              toX: x,
+              toY: y,
+            },
+          ],
+          { pushHistory: true }
+        );
+      }
+
+      if (tool === "highlight") {
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const width = x - drawStartRef.current.x;
+        const height = y - drawStartRef.current.y;
+        if (Math.abs(width) > 2 && Math.abs(height) > 2) {
+          applyShapes(
+            [
+              ...annotationShapes,
+              {
+                id,
+                kind: "highlight",
+                color: strokeColor,
+                size: strokeSize,
+                opacity: highlightOpacity,
+                x: drawStartRef.current.x,
+                y: drawStartRef.current.y,
+                width,
+                height,
+              },
+            ],
+            { pushHistory: true }
+          );
+        }
+      }
+
+      isDrawingRef.current = false;
+      setIsDrawing(false);
+      currentPathRef.current = [];
+    }
+
+    canvasEl.addEventListener("mousedown", handleMouseDown);
+    canvasEl.addEventListener("mousemove", handleMouseMove);
+    canvasEl.addEventListener("mouseup", handleMouseUp);
+    canvasEl.addEventListener("mouseleave", handleMouseUp);
+
+    return () => {
+      canvasEl.removeEventListener("mousedown", handleMouseDown);
+      canvasEl.removeEventListener("mousemove", handleMouseMove);
+      canvasEl.removeEventListener("mouseup", handleMouseUp);
+      canvasEl.removeEventListener("mouseleave", handleMouseUp);
+    };
+  }, [
+    tool,
+    selectedImage?.id,
+    strokeColor,
+    strokeSize,
+    highlightOpacity,
+    selectedAnnotationId,
+    annotationShapes,
+    annotationHistory,
+    annotationHistoryIndex,
+  ]);
 
   useEffect(() => {
     function handleClickOutside() {
@@ -2163,13 +3180,68 @@ export default function DashboardPage() {
             <div className="animate-[fadeIn_0.2s_ease-out] absolute inset-0 z-10 flex min-h-0 min-w-0 overflow-hidden bg-white shadow-xl">
               {/* LEFT: IMAGE */}
               <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
-                <div className="flex h-full min-h-0 w-full items-center justify-center p-2">
-                  <img
-                    src={filteredScreenshots[selectedIndex!].image_url}
-                    alt=""
-                    className="max-h-full max-w-full w-auto cursor-default animate-[fadeIn_0.2s_ease-out] rounded-md object-contain shadow-lg"
-                    onClick={(e) => e.stopPropagation()}
-                  />
+                <div className="relative flex h-full min-h-0 w-full items-center justify-center p-2">
+                  <div className="relative inline-block max-h-full max-w-full">
+                    <img
+                      ref={imageRef}
+                      src={filteredScreenshots[selectedIndex!].image_url}
+                      alt=""
+                      draggable={false}
+                      className="block max-h-[calc(100vh-24px)] max-w-[calc(100vw-460px)] cursor-default animate-[fadeIn_0.2s_ease-out] rounded-md object-contain shadow-lg"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <canvas
+                      ref={canvasRef}
+                      className={`absolute inset-0 h-full w-full ${
+                        tool === "select"
+                          ? isDraggingAnnotation
+                            ? "cursor-grabbing"
+                            : hoveredAnnotationId
+                              ? "cursor-grab"
+                              : "cursor-default"
+                          : "cursor-crosshair"
+                      }`}
+                    />
+                    {textDraft && (
+                      <input
+                        autoFocus
+                        value={textDraft.text}
+                        onChange={(e) =>
+                          setTextDraft((prev) =>
+                            prev ? { ...prev, text: e.target.value } : prev
+                          )
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            applyTextDraft();
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setTextDraft(null);
+                          }
+                        }}
+                        placeholder="Type text and press Enter"
+                        className="absolute z-20 w-56 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 shadow focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                        style={{
+                          left: Math.max(
+                            0,
+                            Math.min(
+                              textDraft.x,
+                              Math.max(0, (canvasRef.current?.width ?? 0) - 230)
+                            )
+                          ),
+                          top: Math.max(
+                            0,
+                            Math.min(
+                              textDraft.y,
+                              Math.max(0, (canvasRef.current?.height ?? 0) - 36)
+                            )
+                          ),
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -2195,6 +3267,179 @@ export default function DashboardPage() {
 
                 {isPanelOpen && (
                   <div className="space-y-6">
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTool("select")}
+                        className={`rounded border px-2 py-1 text-xs ${
+                          tool === "select"
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : "border-gray-300 bg-white text-gray-700"
+                        }`}
+                      >
+                        Select
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTool("draw")}
+                        className={`rounded border px-2 py-1 text-xs ${
+                          tool === "draw"
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : "border-gray-300 bg-white text-gray-700"
+                        }`}
+                      >
+                        ✏️ Draw
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTool("arrow")}
+                        className={`rounded border px-2 py-1 text-xs ${
+                          tool === "arrow"
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : "border-gray-300 bg-white text-gray-700"
+                        }`}
+                      >
+                        ➡️ Arrow
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTool("text")}
+                        className={`rounded border px-2 py-1 text-xs ${
+                          tool === "text"
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : "border-gray-300 bg-white text-gray-700"
+                        }`}
+                      >
+                        T Text
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTool("highlight")}
+                        className={`rounded border px-2 py-1 text-xs ${
+                          tool === "highlight"
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : "border-gray-300 bg-white text-gray-700"
+                        }`}
+                      >
+                        ▭ Highlighter
+                      </button>
+
+                      <label className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700">
+                        Color
+                        <input
+                          type="color"
+                          value={strokeColor}
+                          onChange={(e) => setStrokeColor(e.target.value)}
+                          className="h-6 w-8 cursor-pointer border-0 bg-transparent p-0"
+                          title="Stroke color"
+                        />
+                      </label>
+
+                      <label className="inline-flex items-center gap-2 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700">
+                        Size
+                        <input
+                          type="range"
+                          min={1}
+                          max={12}
+                          value={strokeSize}
+                          onChange={(e) => setStrokeSize(Number(e.target.value))}
+                        />
+                        <span>{strokeSize}</span>
+                      </label>
+
+                      {tool === "highlight" && (
+                        <label className="inline-flex items-center gap-2 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700">
+                          Opacity
+                          <input
+                            type="range"
+                            min={5}
+                            max={80}
+                            value={Math.round(highlightOpacity * 100)}
+                            onChange={(e) =>
+                              setHighlightOpacity(Number(e.target.value) / 100)
+                            }
+                          />
+                          <span>{Math.round(highlightOpacity * 100)}%</span>
+                        </label>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleUndoAnnotation}
+                        disabled={annotationHistoryIndex <= 0}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Undo
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleRedoAnnotation}
+                        disabled={
+                          annotationHistoryIndex < 0 ||
+                          annotationHistoryIndex >= annotationHistory.length - 1
+                        }
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Redo
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={applyTextDraft}
+                        disabled={!textDraft || !textDraft.text.trim()}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Add text
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={clearAnnotationCanvas}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700"
+                      >
+                        Clear
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={deleteSelectedAnnotation}
+                        disabled={!selectedAnnotationId}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Delete selected
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void exportMergedImage()}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700"
+                      >
+                        Export merged
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          applyTextDraft();
+                          void saveAnnotation();
+                        }}
+                        className="rounded border border-gray-900 bg-gray-900 px-2 py-1 text-xs text-white"
+                        disabled={savingAnnotation}
+                      >
+                        {savingAnnotation ? "Saving..." : "Save"}
+                      </button>
+                    </div>
+                    {tool === "select" && (
+                      <p className="text-xs text-gray-500">
+                        Hover to highlight, click to select, then drag to move.
+                      </p>
+                    )}
+
                     {/* ATTRIBUTES */}
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
