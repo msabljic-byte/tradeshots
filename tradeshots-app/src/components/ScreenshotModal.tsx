@@ -294,7 +294,7 @@ export default function ScreenshotModal({
   const canNext = index < screenshots.length - 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/60">
+    <div className="fixed inset-0 z-50 flex bg-black/70 backdrop-blur-sm">
       <div
         className="absolute inset-0 z-0 cursor-pointer"
         onClick={() => setIndex(null)}

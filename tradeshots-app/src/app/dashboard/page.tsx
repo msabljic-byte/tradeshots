@@ -524,7 +524,7 @@ export default function DashboardPage() {
     return Math.random().toString(36).substring(2, 10);
   }
 
-  async function handleShareFolder(folder: any) {
+  async function makePublic(folder: any): Promise<boolean> {
     let shareId = String(folder?.share_id ?? "");
 
     if (!shareId) {
@@ -540,15 +540,33 @@ export default function DashboardPage() {
             ? "folders.share_id column is missing. Please run DB migration to enable sharing."
             : shareError.message
         );
-        return;
+        return false;
       }
 
       await fetchFolders();
+      return true;
     }
 
-    const url = `${window.location.origin}/playbook/${shareId}`;
-    await navigator.clipboard.writeText(url);
-    showToast("Link copied ✓");
+    return true;
+  }
+
+  async function makePrivate(folder: any): Promise<boolean> {
+    const { error } = await supabase
+      .from("folders")
+      .update({ share_id: null })
+      .eq("id", folder.id);
+
+    if (error) {
+      setError(
+        error.message.toLowerCase().includes("share_id")
+          ? "folders.share_id column is missing. Please run DB migration to enable sharing."
+          : error.message
+      );
+      return false;
+    }
+
+    await fetchFolders();
+    return true;
   }
 
   async function handleSaveView() {
@@ -2030,19 +2048,61 @@ export default function DashboardPage() {
               </span>
 
               <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleShareFolder(folder);
-                  }}
-                  className={`text-sm ${
-                    isActive ? "text-white/80 hover:text-white" : "text-gray-400 hover:text-gray-700"
-                  }`}
-                  title="Copy public link"
-                >
-                  🔗
-                </button>
+                {folder.share_id ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const url = `${window.location.origin}/playbook/${folder.share_id}`;
+                        void navigator.clipboard.writeText(url);
+                        showToast("Link copied ✓");
+                      }}
+                      className={`text-sm ${
+                        isActive
+                          ? "text-white/80 hover:text-white"
+                          : "text-gray-400 hover:text-gray-700"
+                      }`}
+                      title="Copy link"
+                    >
+                      🔗
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const ok = await makePrivate(folder);
+                        if (ok) showToast("Sharing disabled");
+                      }}
+                      className={`text-sm ${
+                        isActive
+                          ? "text-white/80 hover:text-red-200"
+                          : "text-gray-400 hover:text-red-600"
+                      }`}
+                      title="Make private"
+                    >
+                      🔒
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const ok = await makePublic(folder);
+                      if (ok) showToast("Playbook is now public");
+                    }}
+                    className={`text-sm ${
+                      isActive
+                        ? "text-white/80 hover:text-green-200"
+                        : "text-gray-400 hover:text-green-600"
+                    }`}
+                    title="Make public"
+                  >
+                    🌍
+                  </button>
+                )}
 
                 <button
                   type="button"

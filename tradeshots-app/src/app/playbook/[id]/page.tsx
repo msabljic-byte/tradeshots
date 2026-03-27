@@ -148,54 +148,61 @@ export default function PublicPlaybookPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold text-gray-900">{folder.name}</h1>
-        <p className="text-sm text-gray-500">Shared playbook</p>
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-6xl px-6 py-10">
+        <div className="relative">
+          <div className="absolute right-0 top-0 text-xs text-gray-400">
+            Powered by Tradeshots
+          </div>
+        </div>
+
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold text-gray-900">{folder.name}</h1>
+          <p className="mt-1 text-sm text-gray-500">Shared playbook</p>
+          <p className="mt-1 text-xs text-gray-400">
+            by {folder.owner_email || "Trader"}
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-6 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        {screenshots.length === 0 ? (
+          <div className="py-20 text-center text-gray-500">
+            <p className="text-sm">No screenshots in this playbook</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+            {screenshots.map((shot, index) => (
+              <button
+                key={shot.id}
+                type="button"
+                onClick={() => setSelectedIndex(index)}
+                className="group cursor-pointer overflow-hidden rounded-xl bg-white shadow-sm transition hover:shadow-md"
+              >
+                <img
+                  src={shot.image_url}
+                  alt=""
+                  draggable={false}
+                  className="h-40 w-full object-cover transition-transform group-hover:scale-[1.02]"
+                />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedIndex !== null && (
+          <ScreenshotModal
+            screenshots={screenshots}
+            index={selectedIndex}
+            setIndex={setSelectedIndex}
+            readOnly={true}
+          />
+        )}
       </div>
-
-      {error && (
-        <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {screenshots.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-sm text-gray-600">
-          No screenshots in this playbook.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {screenshots.map((shot, index) => (
-            <button
-              key={shot.id}
-              type="button"
-              onClick={() => setSelectedIndex(index)}
-              className="group overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-sm transition hover:shadow-md"
-            >
-              <img
-                src={shot.image_url}
-                alt=""
-                className="h-48 w-full object-cover transition group-hover:scale-[1.01]"
-              />
-              <div className="px-3 py-2">
-                <p className="line-clamp-1 text-xs text-gray-600">
-                  {shot.notes || (shot.tags?.join(", ") ?? "Open screenshot")}
-                </p>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {selectedIndex !== null && (
-        <ScreenshotModal
-          screenshots={screenshots}
-          index={selectedIndex}
-          setIndex={setSelectedIndex}
-          readOnly={true}
-        />
-      )}
     </div>
   );
 }
