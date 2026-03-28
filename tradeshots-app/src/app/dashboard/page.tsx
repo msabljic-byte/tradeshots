@@ -221,8 +221,12 @@ export default function DashboardPage() {
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [folders, setFolders] = useState<any[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [description, setDescription] = useState("");
   const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const skipSidebarPersistRef = useRef(true);
 
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -235,6 +239,16 @@ export default function DashboardPage() {
   const [savingAttributes, setSavingAttributes] = useState(false);
   const [savedAttributesToast, setSavedAttributesToast] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<
+    Array<{
+      id: string;
+      message?: string | null;
+      type?: string | null;
+      is_read?: boolean | null;
+      created_at?: string | null;
+    }>
+  >([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -287,6 +301,43 @@ export default function DashboardPage() {
       toastTimeoutRef.current = null;
     }, 2000);
   }
+
+  async function loadNotifications() {
+    const { data: auth } = await supabase.auth.getUser();
+    const user = auth.user;
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (error) {
+      setNotifications([]);
+      return;
+    }
+
+    setNotifications(data ?? []);
+  }
+
+  async function markAllNotificationsRead() {
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) return;
+
+    await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("user_id", auth.user.id);
+
+    await loadNotifications();
+  }
+
+  const unreadNotificationCount = notifications.filter((n) => !n.is_read).length;
 
   function addFilter(key: string, value: string) {
     const normalizedKey = key.trim().toLowerCase();
@@ -457,6 +508,31 @@ export default function DashboardPage() {
     setFolders(data || []);
   }
 
+  async function savePlaybookDescription(
+    folderId: string,
+    nextDescription: string
+  ) {
+    const { error: updErr } = await supabase
+      .from("folders")
+      .update({ description: nextDescription })
+      .eq("id", folderId);
+
+    if (updErr) {
+      const msg = updErr.message.toLowerCase();
+      if (msg.includes("description") || msg.includes("column")) {
+        setError(
+          "Add the description column: run `alter table public.folders add column if not exists description text;` in Supabase."
+        );
+      } else {
+        setError(updErr.message);
+      }
+      return;
+    }
+
+    setError(null);
+    await fetchFolders();
+  }
+
   async function createFolder(name: string, parentId: string | null = null) {
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) return;
@@ -509,7 +585,10 @@ export default function DashboardPage() {
   }
 
   function hasChildren(folderId: string) {
-    return folders.some((f: any) => f.parent_id === folderId);
+    return folders.some(
+      (f: any) =>
+        f.parent_id != null && String(f.parent_id) === String(folderId)
+    );
   }
 
   function getFolderCount(folderId: string) {
@@ -665,6 +744,7 @@ export default function DashboardPage() {
       setEmail(user.email ?? null);
       await fetchScreenshots();
       await fetchAllAttributes();
+      await loadNotifications();
     }
 
     loadDashboardData().finally(() => {
@@ -686,6 +766,16 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    if (!activeFolderId) {
+      setDescription("");
+      setEditingDescription(false);
+      return;
+    }
+    const f = folders.find((x: any) => String(x.id) === String(activeFolderId));
+    setDescription(String(f?.description ?? ""));
+  }, [activeFolderId, folders]);
+
+  useEffect(() => {
     setMounted(true);
   }, []);
 
@@ -699,6 +789,9 @@ export default function DashboardPage() {
       const target = e.target as Element | null;
       if (!target?.closest(".profile-menu")) {
         setIsProfileOpen(false);
+      }
+      if (!target?.closest(".notification-container")) {
+        setNotificationsOpen(false);
       }
     }
 
@@ -1975,9 +2068,16 @@ export default function DashboardPage() {
     [commandViewResults, commandScreenshotResults]
   );
 
+  function folderMatchesParent(f: { parent_id?: string | null }, parentId: string | null) {
+    if (parentId == null) {
+      return f.parent_id == null;
+    }
+    return f.parent_id === parentId;
+  }
+
   function renderFolders(parentId: string | null = null, level = 0) {
     return folders
-      .filter((f: any) => f.parent_id === parentId)
+      .filter((f: any) => folderMatchesParent(f, parentId))
       .map((folder: any) => {
         const isExpanded = expandedFolders.has(String(folder.id));
         const isActive = activeFolderId === folder.id;
@@ -1986,7 +2086,7 @@ export default function DashboardPage() {
           <div key={folder.id}>
             <div
               className={`
-                group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5
+                group flex min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5
                 ${isActive ? "bg-gray-900 text-white" : "text-gray-700 hover:bg-gray-100"}
                 ${draggedScreenshotId.length > 0 ? "hover:bg-blue-100" : ""}
                 ${hoverFolderId === folder.id ? "bg-blue-100" : ""}
@@ -2034,9 +2134,20 @@ export default function DashboardPage() {
 
               <span
                 onClick={() => setActiveFolderId(folder.id)}
-                className="truncate text-sm"
+                className="min-w-0 flex-1 truncate text-sm"
               >
                 📁 {folder.name}
+                {folder.is_imported ? (
+                  <span
+                    className={`ml-1.5 align-middle text-[10px] font-semibold uppercase tracking-wide ${
+                      isActive
+                        ? "rounded bg-white/20 px-1 py-0.5 text-white/90"
+                        : "rounded bg-amber-100 px-1 py-0.5 text-amber-900"
+                    }`}
+                  >
+                    Imported
+                  </span>
+                ) : null}
               </span>
 
               <span
@@ -2140,7 +2251,7 @@ export default function DashboardPage() {
 
   function renderFolderOptions(parentId: string | null = null, level = 0) {
     return folders
-      .filter((f: any) => f.parent_id === parentId)
+      .filter((f: any) => folderMatchesParent(f, parentId))
       .map((folder: any) => (
         <div key={`move-${folder.id}`}>
           <button
@@ -2618,10 +2729,37 @@ export default function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("sidebarWidth");
+      if (saved != null && saved !== "") {
+        const n = Number(saved);
+        if (!Number.isNaN(n)) {
+          setSidebarWidth(Math.min(500, Math.max(200, n)));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (skipSidebarPersistRef.current) {
+      skipSidebarPersistRef.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem("sidebarWidth", String(sidebarWidth));
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarWidth]);
+
   return (
     <div className="flex h-screen bg-gray-50">
       <div
-        className="flex w-64 flex-col border-r border-gray-200 bg-white p-4"
+        style={{ width: sidebarWidth }}
+        className="relative box-border flex min-w-0 shrink-0 flex-col border-r border-gray-200 bg-white p-4"
         onDragOver={(e) => e.preventDefault()}
       >
         <h1 className="mb-6 text-lg font-semibold text-gray-900">TradeShots</h1>
@@ -2656,9 +2794,74 @@ export default function DashboardPage() {
 
           <div className="space-y-1">{renderFolders(null, 0)}</div>
         </div>
+
+        {activeFolderId && (
+          <div className="mt-4 border-t border-gray-100 pt-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Playbook description
+            </p>
+            <div className="mt-2">
+              {editingDescription ? (
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  onBlur={async () => {
+                    setEditingDescription(false);
+                    if (!activeFolderId) return;
+                    await savePlaybookDescription(activeFolderId, description);
+                  }}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300"
+                  placeholder="Add description..."
+                  rows={3}
+                  autoFocus
+                />
+              ) : (
+                <p
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setEditingDescription(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setEditingDescription(true);
+                    }
+                  }}
+                  className="cursor-pointer rounded-md p-1 text-sm text-gray-500 hover:bg-gray-50"
+                >
+                  {description || "Add description..."}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = sidebarWidth;
+
+            function onMouseMove(ev: MouseEvent) {
+              const next = startWidth + (ev.clientX - startX);
+              setSidebarWidth(Math.min(500, Math.max(200, next)));
+            }
+
+            function onMouseUp() {
+              window.removeEventListener("mousemove", onMouseMove);
+              window.removeEventListener("mouseup", onMouseUp);
+            }
+
+            window.addEventListener("mousemove", onMouseMove);
+            window.addEventListener("mouseup", onMouseUp);
+          }}
+          className="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-gray-100"
+        />
       </div>
 
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
           <div className="w-full max-w-md">
             <button
@@ -2671,7 +2874,65 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          <div className="ml-4 flex min-w-[44px] items-center justify-end">
+          <div className="ml-4 flex min-w-[44px] items-center justify-end gap-2">
+            <div className="notification-container relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setNotificationsOpen((v) => !v);
+                }}
+                aria-expanded={notificationsOpen}
+                aria-haspopup="menu"
+                className="relative flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 bg-white text-base shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300"
+              >
+                <span aria-hidden>🔔</span>
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 min-w-[1.125rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-tight text-white">
+                    {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                  </span>
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div className="absolute right-0 z-50 mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="border-b border-gray-100 p-3 text-sm font-medium text-gray-900">
+                    Notifications
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="p-3 text-sm text-gray-500">
+                        No notifications
+                      </div>
+                    ) : (
+                      notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className={`border-b border-gray-100 p-3 text-sm last:border-b-0 ${
+                            n.is_read ? "text-gray-500" : "font-medium text-gray-900"
+                          }`}
+                        >
+                          {n.message ?? n.type ?? "Notification"}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void markAllNotificationsRead();
+                    }}
+                    className="w-full border-t border-gray-100 p-2 text-sm text-gray-600 transition hover:bg-gray-100"
+                  >
+                    Mark all as read
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="profile-menu relative">
               <button
                 type="button"
