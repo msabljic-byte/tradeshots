@@ -2,10 +2,14 @@
 
 import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { notifyPlaybookImportersIfShared } from "@/lib/notifyPlaybookImporters";
 
 export default function ScreenshotUploader({
+  folderId,
   onUploadComplete,
 }: {
+  /** When set, new screenshots are created inside this playbook folder. */
+  folderId?: string | null;
   onUploadComplete?: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -111,11 +115,18 @@ export default function ScreenshotUploader({
 
       console.log("Uploading for user:", user.id);
 
-      const { error: insertError } = await supabase.from("screenshots").insert({
+      const insertPayload: Record<string, unknown> = {
         user_id: user.id,
         image_url: publicUrl,
         tags: tagsArray,
-      });
+      };
+      if (folderId != null && folderId !== "") {
+        insertPayload.folder_id = folderId;
+      }
+
+      const { error: insertError } = await supabase
+        .from("screenshots")
+        .insert(insertPayload);
 
       if (insertError) {
         setErrorMessage(insertError.message);
@@ -123,6 +134,10 @@ export default function ScreenshotUploader({
           setErrorMessage(null);
         }, 3000);
         return;
+      }
+
+      if (folderId != null && folderId !== "") {
+        await notifyPlaybookImportersIfShared(supabase, folderId);
       }
 
       setSuccessMessage("Screenshot uploaded successfully.");

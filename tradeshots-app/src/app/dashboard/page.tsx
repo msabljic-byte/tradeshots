@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { notifyPlaybookImportersIfShared } from "@/lib/notifyPlaybookImporters";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
 import { createPortal } from "react-dom";
 
@@ -176,6 +177,19 @@ function buildAttributeMapFromRows(
     }
   }
   return map;
+}
+
+function getNotificationIcon(type: string | null | undefined): string {
+  switch (type) {
+    case "import":
+      return "📥";
+    case "update":
+      return "🔄";
+    case "payment":
+      return "💳";
+    default:
+      return "🔔";
+  }
 }
 
 export default function DashboardPage() {
@@ -1221,6 +1235,12 @@ export default function DashboardPage() {
         )
       );
 
+      if (shot.folder_id) {
+        await notifyPlaybookImportersIfShared(supabase, String(shot.folder_id), {
+          notifyImportersOnCopyUpdates: true,
+        });
+      }
+
       setSavedNoteToast(true);
       setTimeout(() => setSavedNoteToast(false), 2000);
     } finally {
@@ -1290,6 +1310,13 @@ export default function DashboardPage() {
       if (rows.length === 0) {
         await fetchAllAttributes();
         await refreshTradeAttributesIndex();
+        if (screenshot.folder_id) {
+          await notifyPlaybookImportersIfShared(
+            supabase,
+            String(screenshot.folder_id),
+            { notifyImportersOnCopyUpdates: true }
+          );
+        }
         if (showToast) {
           setSavedAttributesToast(true);
           setTimeout(() => setSavedAttributesToast(false), 2000);
@@ -1308,6 +1335,13 @@ export default function DashboardPage() {
 
       await fetchAllAttributes();
       await refreshTradeAttributesIndex();
+      if (screenshot.folder_id) {
+        await notifyPlaybookImportersIfShared(
+          supabase,
+          String(screenshot.folder_id),
+          { notifyImportersOnCopyUpdates: true }
+        );
+      }
       if (showToast) {
         setSavedAttributesToast(true);
         setTimeout(() => setSavedAttributesToast(false), 2000);
@@ -1402,6 +1436,17 @@ export default function DashboardPage() {
 
         await fetchAllAttributes();
         await refreshTradeAttributesIndex();
+
+        const bulkFolderIds = new Set<string>();
+        for (const sid of bulkTargetIds) {
+          const row = allScreenshots.find((s: any) => String(s.id) === String(sid));
+          if (row?.folder_id) bulkFolderIds.add(String(row.folder_id));
+        }
+        for (const fid of bulkFolderIds) {
+          await notifyPlaybookImportersIfShared(supabase, fid, {
+            notifyImportersOnCopyUpdates: true,
+          });
+        }
 
         setSavedAttributesToast(true);
         setTimeout(() => setSavedAttributesToast(false), 2000);
@@ -1921,6 +1966,8 @@ export default function DashboardPage() {
   async function saveAnnotation() {
     if (!selectedImage?.id) return;
 
+    const syncFolderId = selectedImage.folder_id;
+
     setSavingAnnotation(true);
     try {
       const payloadObject = {
@@ -1962,6 +2009,13 @@ export default function DashboardPage() {
                   : s
               )
             );
+            if (syncFolderId) {
+              await notifyPlaybookImportersIfShared(
+                supabase,
+                String(syncFolderId),
+                { notifyImportersOnCopyUpdates: true }
+              );
+            }
             return;
           }
         }
@@ -1982,6 +2036,13 @@ export default function DashboardPage() {
                 : s
             )
           );
+          if (syncFolderId) {
+            await notifyPlaybookImportersIfShared(
+              supabase,
+              String(syncFolderId),
+              { notifyImportersOnCopyUpdates: true }
+            );
+          }
           return;
         }
         setError(
@@ -2005,6 +2066,12 @@ export default function DashboardPage() {
             : s
         )
       );
+
+      if (syncFolderId) {
+        await notifyPlaybookImportersIfShared(supabase, String(syncFolderId), {
+          notifyImportersOnCopyUpdates: true,
+        });
+      }
     } finally {
       setSavingAnnotation(false);
     }
@@ -2013,15 +2080,23 @@ export default function DashboardPage() {
   async function moveToFolder(folderId: string) {
     if (!selectedIds.length) return;
 
-    await supabase
+    const { error: moveError } = await supabase
       .from("screenshots")
       .update({ folder_id: folderId })
       .in("id", selectedIds);
+
+    if (moveError) {
+      setError(moveError.message);
+      return;
+    }
 
     setSelectedIds([]);
     setShowMoveMenu(false);
 
     await fetchScreenshots();
+    // Sync importers when setups land in a shared playbook (subfolder OK). DB trigger
+    // `screenshots_folder_change_notify_importers` can also call this after folder_id updates.
+    await notifyPlaybookImportersIfShared(supabase, String(folderId));
   }
 
   const commandViewResults = useMemo(() => {
@@ -2104,15 +2179,21 @@ export default function DashboardPage() {
 
                 if (!draggedScreenshotId || draggedScreenshotId.length === 0) return;
 
-                await supabase
+                const { error: moveError } = await supabase
                   .from("screenshots")
                   .update({ folder_id: folder.id })
                   .in("id", draggedScreenshotId);
+
+                if (moveError) {
+                  setError(moveError.message);
+                  return;
+                }
 
                 setDraggedScreenshotId([]);
                 setHoverFolderId(null);
                 setSelectedIds([]);
                 await fetchScreenshots();
+                await notifyPlaybookImportersIfShared(supabase, String(folder.id));
               }}
             >
               {hasChildren(String(folder.id)) ? (
@@ -2440,7 +2521,7 @@ export default function DashboardPage() {
     setHoveredAnnotationId(null);
     setIsDraggingAnnotation(false);
     setTextDraft(null);
-  }, [selectedImage?.id]);
+  }, [selectedImage?.id, selectedImage?.annotations, selectedImage?.annotation]);
 
   useEffect(() => {
     if (!selectedImage) return;
@@ -2913,7 +2994,17 @@ export default function DashboardPage() {
                             n.is_read ? "text-gray-500" : "font-medium text-gray-900"
                           }`}
                         >
-                          {n.message ?? n.type ?? "Notification"}
+                          <div className="flex items-start gap-2">
+                            <span
+                              className="shrink-0 text-base leading-snug"
+                              aria-hidden
+                            >
+                              {getNotificationIcon(n.type)}
+                            </span>
+                            <span className="min-w-0 flex-1 leading-snug">
+                              {n.message ?? n.type ?? "Notification"}
+                            </span>
+                          </div>
                         </div>
                       ))
                     )}
@@ -2996,7 +3087,10 @@ export default function DashboardPage() {
               </div>
 
               <div className="mb-6">
-                <ScreenshotUploader onUploadComplete={fetchScreenshots} />
+                <ScreenshotUploader
+                  folderId={activeFolderId}
+                  onUploadComplete={fetchScreenshots}
+                />
               </div>
 
               {screenshots.length === 0 ? (

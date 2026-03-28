@@ -178,6 +178,21 @@ export default function PublicPlaybookPage() {
         console.warn("folders.is_imported:", importedFlagErr.message);
       }
 
+      const { error: linkErr } = await supabase.from("user_playbooks").insert({
+        user_id: userId,
+        source_folder_id: sourceFolderId,
+        copy_folder_id: newFolder.id,
+      });
+
+      if (linkErr) {
+        showToast(
+          linkErr.message ??
+            "Could not link import (add user_playbooks.copy_folder_id in Supabase). Import cancelled."
+        );
+        await supabase.from("folders").delete().eq("id", newFolder.id);
+        return;
+      }
+
       const { data: sourceScreenshots, error: shotsErr } = await supabase
         .from("screenshots")
         .select("*")
@@ -188,38 +203,24 @@ export default function PublicPlaybookPage() {
         return;
       }
 
-      const rows = sourceScreenshots ?? [];
-      const sourceIds = rows.map((s: { id: string }) => s.id);
+      const rows = (sourceScreenshots ?? []) as Record<string, unknown>[];
 
-      const attrByShot: Record<string, Array<{ key: string; value: string }>> =
-        {};
-      if (sourceIds.length > 0) {
-        const { data: attrRows } = await supabase
-          .from("trade_attributes")
-          .select("*")
-          .in("screenshot_id", sourceIds);
+      for (const s of rows) {
+        const sourceShotId = String(s.id);
 
-        for (const row of (attrRows ?? []) as Record<string, unknown>[]) {
-          const parsed = parseTradeAttributeRow(row);
-          const sid =
-            row.screenshot_id != null ? String(row.screenshot_id) : "";
-          if (!sid || !parsed) continue;
-          if (!attrByShot[sid]) attrByShot[sid] = [];
-          attrByShot[sid].push({ key: parsed.key, value: parsed.value });
-        }
-      }
-
-      for (const s of rows as Record<string, unknown>[]) {
-        const sid = String(s.id);
         const insertPayload: Record<string, unknown> = {
           folder_id: newFolder.id,
           user_id: userId,
           image_url: s.image_url,
           notes: s.notes ?? null,
           tags: s.tags ?? null,
+          source_screenshot_id: sourceShotId,
         };
-        if (s.annotations != null) insertPayload.annotations = s.annotations;
-        else if (s.annotation != null) insertPayload.annotation = s.annotation;
+        if (s.annotations != null) {
+          insertPayload.annotations = s.annotations;
+        } else if (s.annotation != null) {
+          insertPayload.annotation = s.annotation;
+        }
 
         const { data: newShot, error: insErr } = await supabase
           .from("screenshots")
@@ -232,31 +233,38 @@ export default function PublicPlaybookPage() {
           return;
         }
 
-        const attrs = attrByShot[sid] ?? [];
-        if (attrs.length > 0) {
+        const { data: sourceAttrs } = await supabase
+          .from("trade_attributes")
+          .select("*")
+          .eq("screenshot_id", sourceShotId);
+
+        const attrInserts: Array<{
+          screenshot_id: string;
+          user_id: string;
+          key: string;
+          value: string;
+        }> = [];
+
+        for (const row of (sourceAttrs ?? []) as Record<string, unknown>[]) {
+          const parsed = parseTradeAttributeRow(row);
+          if (!parsed) continue;
+          attrInserts.push({
+            screenshot_id: newShot.id,
+            user_id: userId,
+            key: parsed.key,
+            value: parsed.value,
+          });
+        }
+
+        if (attrInserts.length > 0) {
           const { error: attrInsErr } = await supabase
             .from("trade_attributes")
-            .insert(
-              attrs.map((a) => ({
-                screenshot_id: newShot.id,
-                user_id: userId,
-                key: a.key,
-                value: a.value,
-              }))
-            );
+            .insert(attrInserts);
           if (attrInsErr) {
             showToast(attrInsErr.message);
             return;
           }
         }
-      }
-
-      const { error: linkErr } = await supabase.from("user_playbooks").insert({
-        user_id: userId,
-        source_folder_id: sourceFolderId,
-      });
-      if (linkErr && !isOptionalSchemaMissing(linkErr)) {
-        console.warn("user_playbooks insert:", linkErr.message);
       }
 
       const { error: notifErr } = await supabase.from("notifications").insert({
