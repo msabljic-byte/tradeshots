@@ -14,6 +14,8 @@ type ScreenshotRow = {
   annotation?: unknown;
   annotations?: unknown;
   attributes?: Array<{ name: string; value: string }>;
+  /** True for rows just imported/synced from a shared playbook (highlight in UI). */
+  is_new?: boolean | null;
 };
 
 const LOCAL_ANNOTATIONS_KEY = "tradeshots.localAnnotations.v1";
@@ -113,7 +115,7 @@ export default function PublicPlaybookPage() {
     };
   }, []);
 
-  async function importPlaybook() {
+  async function syncPlaybook() {
     if (!folder) return;
 
     if (folder.is_paid && !hasAccess) {
@@ -215,6 +217,7 @@ export default function PublicPlaybookPage() {
           notes: s.notes ?? null,
           tags: s.tags ?? null,
           source_screenshot_id: sourceShotId,
+          is_new: true,
         };
         if (s.annotations != null) {
           insertPayload.annotations = s.annotations;
@@ -426,7 +429,7 @@ export default function PublicPlaybookPage() {
               <button
                 type="button"
                 disabled={importing}
-                onClick={() => void importPlaybook()}
+                onClick={() => void syncPlaybook()}
                 className="rounded-lg bg-gray-900 px-6 py-2 text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {importing ? "Importing…" : "Import Playbook"}

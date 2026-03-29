@@ -1,9 +1,7 @@
 -- Run in Supabase SQL Editor AFTER `notify_playbook_importers.sql` is applied.
 --
--- When screenshots.folder_id is updated (drag-drop, Move To, API, etc.), calls
--- notify_playbook_importers once per distinct destination folder per UPDATE statement.
--- This covers authors moving setups from a non-shared folder into a shared playbook tree
--- so importers get copies + "New setup added" when the RPC inserts new rows.
+-- When screenshots.folder_id is updated (drag-drop, Move To, API, etc.), syncs copies only.
+-- App calls notify_playbook_update after moves to avoid duplicate notifications.
 --
 -- Note: Cannot use "UPDATE OF folder_id" with transition tables (PostgreSQL restriction).
 -- Trigger runs on any UPDATE; the function only calls notify when folder_id actually changed.

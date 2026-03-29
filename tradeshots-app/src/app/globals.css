@@ -68,3 +68,47 @@ body {
 .animate-fade-in {
   animation: toastFadeIn 0.2s ease-out;
 }
+
+/* One-shot glow when a card is new or updated (first paint only). */
+@keyframes cardHighlightNew {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(59, 130, 246, 0.12),
+      0 8px 28px -14px rgba(59, 130, 246, 0.2);
+  }
+  45% {
+    box-shadow:
+      0 0 0 1px rgba(59, 130, 246, 0.28),
+      0 10px 36px -10px rgba(59, 130, 246, 0.42);
+  }
+}
+
+@keyframes cardHighlightUpdated {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(245, 158, 11, 0.14),
+      0 8px 28px -14px rgba(245, 158, 11, 0.18);
+  }
+  45% {
+    box-shadow:
+      0 0 0 1px rgba(245, 158, 11, 0.32),
+      0 10px 36px -10px rgba(251, 191, 36, 0.38);
+  }
+}
+
+.animate-card-highlight-new {
+  animation: cardHighlightNew 1.75s ease-in-out 1;
+}
+
+.animate-card-highlight-updated {
+  animation: cardHighlightUpdated 1.75s ease-in-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-card-highlight-new,
+  .animate-card-highlight-updated {
+    animation: none;
+  }
+}

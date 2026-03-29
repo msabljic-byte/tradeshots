@@ -2,7 +2,7 @@
 
 import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { notifyPlaybookImportersIfShared } from "@/lib/notifyPlaybookImporters";
+import { syncSharedPlaybookAndNotifyImporters } from "@/lib/notifyPlaybookUpdate";
 
 export default function ScreenshotUploader({
   folderId,
@@ -137,7 +137,11 @@ export default function ScreenshotUploader({
       }
 
       if (folderId != null && folderId !== "") {
-        await notifyPlaybookImportersIfShared(supabase, folderId);
+        await syncSharedPlaybookAndNotifyImporters(
+          supabase,
+          folderId,
+          "new_content"
+        );
       }
 
       setSuccessMessage("Screenshot uploaded successfully.");

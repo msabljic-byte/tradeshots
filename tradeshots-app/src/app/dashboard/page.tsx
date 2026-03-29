@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { notifyPlaybookImportersIfShared } from "@/lib/notifyPlaybookImporters";
+import {
+  syncSharedPlaybookAndNotifyImporters,
+  syncSharedPlaybookAndNotifyFromScreenshotId,
+} from "@/lib/notifyPlaybookUpdate";
+import {
+  markScreenshotUpdated,
+  markScreenshotsUpdated,
+} from "@/lib/markScreenshotUpdated";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
 import { createPortal } from "react-dom";
 
@@ -16,6 +23,20 @@ type ScreenshotRow = {
   folder_id?: string | null;
   annotation?: unknown; // legacy
   annotations?: unknown; // structured JSON (preferred)
+  /** True for rows just synced from a shared playbook (highlight in UI). */
+  is_new?: boolean | null;
+  /** True after notes, annotations, or attributes change (visible to importers after sync). */
+  is_updated?: boolean | null;
+};
+
+type NotificationRow = {
+  id: string;
+  message?: string | null;
+  type?: string | null;
+  is_read?: boolean | null;
+  created_at?: string | null;
+  /** Author's shared root; importer maps via `user_playbooks` to `copy_folder_id`. */
+  source_folder_id?: string | null;
 };
 
 type AnnotationShape =
@@ -241,6 +262,8 @@ export default function DashboardPage() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const skipSidebarPersistRef = useRef(true);
+  const prevActiveFolderIdRef = useRef<string | null>(null);
+  const screenshotsGridRef = useRef<HTMLDivElement | null>(null);
 
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -253,15 +276,7 @@ export default function DashboardPage() {
   const [savingAttributes, setSavingAttributes] = useState(false);
   const [savedAttributesToast, setSavedAttributesToast] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<
-    Array<{
-      id: string;
-      message?: string | null;
-      type?: string | null;
-      is_read?: boolean | null;
-      created_at?: string | null;
-    }>
-  >([]);
+  const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -351,6 +366,79 @@ export default function DashboardPage() {
     await loadNotifications();
   }
 
+  /** "Playbook updated" rows include `source_folder_id` (author root) → resolve importer copy folder. */
+  function canOpenPlaybookFromNotification(n: NotificationRow): boolean {
+    return Boolean(n.source_folder_id && n.type === "update");
+  }
+
+  async function openPlaybookFromNotification(n: NotificationRow) {
+    const sourceRoot = n.source_folder_id;
+    if (!sourceRoot || n.type !== "update") return;
+
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) return;
+
+    const { data: link, error } = await supabase
+      .from("user_playbooks")
+      .select("copy_folder_id")
+      .eq("user_id", auth.user.id)
+      .eq("source_folder_id", sourceRoot)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("user_playbooks (notification):", error.message);
+      showToast("Could not open playbook.");
+      return;
+    }
+
+    const copyId = link?.copy_folder_id as string | null | undefined;
+    if (!copyId) {
+      showToast("No imported copy found for this playbook.");
+      return;
+    }
+
+    const { data: folderRows } = await supabase
+      .from("folders")
+      .select("id, parent_id")
+      .eq("user_id", auth.user.id);
+
+    const byId = new Map(
+      (folderRows ?? []).map((f: { id: string; parent_id?: string | null }) => [
+        String(f.id),
+        f,
+      ])
+    );
+
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      let cur: string | null = String(copyId);
+      for (let guard = 0; guard < 48 && cur; guard++) {
+        const f = byId.get(cur);
+        if (!f?.parent_id || String(f.parent_id).length === 0) break;
+        const pid = String(f.parent_id);
+        next.add(pid);
+        cur = pid;
+      }
+      return next;
+    });
+
+    setActiveFolderId(String(copyId));
+    setNotificationsOpen(false);
+
+    await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("id", n.id);
+    await loadNotifications();
+
+    window.setTimeout(() => {
+      screenshotsGridRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
+  }
+
   const unreadNotificationCount = notifications.filter((n) => !n.is_read).length;
 
   function addFilter(key: string, value: string) {
@@ -393,7 +481,9 @@ export default function DashboardPage() {
 
     const initial = await supabase
       .from("screenshots")
-      .select("id, image_url, created_at, tags, notes, folder_id, annotations, annotation")
+      .select(
+        "id, image_url, created_at, tags, notes, folder_id, annotations, annotation, is_new, is_updated"
+      )
       .eq("user_id", user.id)
       .order("created_at", {
         ascending: false,
@@ -409,7 +499,7 @@ export default function DashboardPage() {
     ) {
       const fallbackLegacy = await supabase
         .from("screenshots")
-        .select("id, image_url, created_at, tags, notes, folder_id, annotation")
+        .select("id, image_url, created_at, tags, notes, folder_id, annotation, is_new, is_updated")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
@@ -424,7 +514,7 @@ export default function DashboardPage() {
     ) {
       const fallbackBase = await supabase
         .from("screenshots")
-        .select("id, image_url, created_at, tags, notes, folder_id")
+        .select("id, image_url, created_at, tags, notes, folder_id, is_new, is_updated")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
@@ -768,8 +858,38 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (checkingSession) return;
-    fetchScreenshots();
-  }, [activeFolderId]);
+
+    async function run() {
+      const prev = prevActiveFolderIdRef.current;
+      const next = activeFolderId;
+
+      // Clear highlight flags when leaving a folder (not on open), so NEW/UPDATED stay visible while viewing.
+      if (prev != null && prev !== next) {
+        const { error } = await supabase
+          .from("screenshots")
+          .update({ is_new: false, is_updated: false })
+          .eq("folder_id", prev);
+
+        if (error) {
+          const m = error.message.toLowerCase();
+          if (
+            !m.includes("is_new") &&
+            !m.includes("is_updated") &&
+            !m.includes("column") &&
+            !m.includes("schema cache")
+          ) {
+            console.warn("clear is_new / is_updated on folder leave:", error.message);
+          }
+        }
+      }
+
+      prevActiveFolderIdRef.current = next;
+
+      await fetchScreenshots();
+    }
+
+    void run();
+  }, [activeFolderId, checkingSession]);
 
   useEffect(() => {
     fetchSavedViews();
@@ -1215,7 +1335,7 @@ export default function DashboardPage() {
 
       const { error: saveError } = await supabase
         .from("screenshots")
-        .update({ notes: currentNote })
+        .update({ notes: currentNote, is_updated: true })
         .eq("id", shot.id);
 
       if (saveError) {
@@ -1230,16 +1350,13 @@ export default function DashboardPage() {
             ? {
                 ...s,
                 notes: currentNote,
+                is_updated: true,
               }
             : s
         )
       );
 
-      if (shot.folder_id) {
-        await notifyPlaybookImportersIfShared(supabase, String(shot.folder_id), {
-          notifyImportersOnCopyUpdates: true,
-        });
-      }
+      await syncSharedPlaybookAndNotifyFromScreenshotId(supabase, shot.id);
 
       setSavedNoteToast(true);
       setTimeout(() => setSavedNoteToast(false), 2000);
@@ -1308,15 +1425,23 @@ export default function DashboardPage() {
         .filter((r) => r.key.trim().length > 0);
 
       if (rows.length === 0) {
+        await markScreenshotUpdated(supabase, screenshot.id);
+        setScreenshots((prev) =>
+          prev.map((s) =>
+            s.id === screenshot.id ? { ...s, is_updated: true } : s
+          )
+        );
+        setAllScreenshots((prev: any[]) =>
+          prev.map((s) =>
+            s.id === screenshot.id ? { ...s, is_updated: true } : s
+          )
+        );
         await fetchAllAttributes();
         await refreshTradeAttributesIndex();
-        if (screenshot.folder_id) {
-          await notifyPlaybookImportersIfShared(
-            supabase,
-            String(screenshot.folder_id),
-            { notifyImportersOnCopyUpdates: true }
-          );
-        }
+        await syncSharedPlaybookAndNotifyFromScreenshotId(
+          supabase,
+          screenshot.id
+        );
         if (showToast) {
           setSavedAttributesToast(true);
           setTimeout(() => setSavedAttributesToast(false), 2000);
@@ -1333,15 +1458,23 @@ export default function DashboardPage() {
         return;
       }
 
+      await markScreenshotUpdated(supabase, screenshot.id);
+      setScreenshots((prev) =>
+        prev.map((s) =>
+          s.id === screenshot.id ? { ...s, is_updated: true } : s
+        )
+      );
+      setAllScreenshots((prev: any[]) =>
+        prev.map((s) =>
+          s.id === screenshot.id ? { ...s, is_updated: true } : s
+        )
+      );
       await fetchAllAttributes();
       await refreshTradeAttributesIndex();
-      if (screenshot.folder_id) {
-        await notifyPlaybookImportersIfShared(
-          supabase,
-          String(screenshot.folder_id),
-          { notifyImportersOnCopyUpdates: true }
-        );
-      }
+      await syncSharedPlaybookAndNotifyFromScreenshotId(
+        supabase,
+        screenshot.id
+      );
       if (showToast) {
         setSavedAttributesToast(true);
         setTimeout(() => setSavedAttributesToast(false), 2000);
@@ -1437,15 +1570,28 @@ export default function DashboardPage() {
         await fetchAllAttributes();
         await refreshTradeAttributesIndex();
 
+        await markScreenshotsUpdated(
+          supabase,
+          bulkTargetIds.map((id) => String(id))
+        );
+        setScreenshots((prev) =>
+          prev.map((s) =>
+            bulkTargetIds.includes(s.id) ? { ...s, is_updated: true } : s
+          )
+        );
+        setAllScreenshots((prev: any[]) =>
+          prev.map((s) =>
+            bulkTargetIds.includes(s.id) ? { ...s, is_updated: true } : s
+          )
+        );
+
         const bulkFolderIds = new Set<string>();
         for (const sid of bulkTargetIds) {
           const row = allScreenshots.find((s: any) => String(s.id) === String(sid));
           if (row?.folder_id) bulkFolderIds.add(String(row.folder_id));
         }
         for (const fid of bulkFolderIds) {
-          await notifyPlaybookImportersIfShared(supabase, fid, {
-            notifyImportersOnCopyUpdates: true,
-          });
+          await syncSharedPlaybookAndNotifyImporters(supabase, fid);
         }
 
         setSavedAttributesToast(true);
@@ -1586,6 +1732,21 @@ export default function DashboardPage() {
     }));
 
     await supabase.from("trade_attributes").insert(rows);
+
+    await markScreenshotsUpdated(
+      supabase,
+      selectedIds.map((id) => String(id))
+    );
+    setScreenshots((prev) =>
+      prev.map((s) =>
+        selectedIds.includes(s.id) ? { ...s, is_updated: true } : s
+      )
+    );
+    setAllScreenshots((prev: any[]) =>
+      prev.map((s) =>
+        selectedIds.includes(s.id) ? { ...s, is_updated: true } : s
+      )
+    );
 
     setSelectedIds([]);
 
@@ -1966,8 +2127,6 @@ export default function DashboardPage() {
   async function saveAnnotation() {
     if (!selectedImage?.id) return;
 
-    const syncFolderId = selectedImage.folder_id;
-
     setSavingAnnotation(true);
     try {
       const payloadObject = {
@@ -1981,7 +2140,7 @@ export default function DashboardPage() {
 
       const { error: annotationError } = await supabase
         .from("screenshots")
-        .update({ annotations: payloadObject })
+        .update({ annotations: payloadObject, is_updated: true })
         .eq("id", selectedImage.id);
 
       if (annotationError) {
@@ -1991,31 +2150,38 @@ export default function DashboardPage() {
           const payload = JSON.stringify(payloadObject);
           const legacy = await supabase
             .from("screenshots")
-            .update({ annotation: payload })
+            .update({ annotation: payload, is_updated: true })
             .eq("id", selectedImage.id);
           if (!legacy.error) {
             setError(null);
             setScreenshots((prev) =>
               prev.map((s) =>
                 s.id === selectedImage.id
-                  ? { ...s, annotations: payloadObject, annotation: payload }
+                  ? {
+                      ...s,
+                      annotations: payloadObject,
+                      annotation: payload,
+                      is_updated: true,
+                    }
                   : s
               )
             );
             setAllScreenshots((prev: any[]) =>
               prev.map((s) =>
                 s.id === selectedImage.id
-                  ? { ...s, annotations: payloadObject, annotation: payload }
+                  ? {
+                      ...s,
+                      annotations: payloadObject,
+                      annotation: payload,
+                      is_updated: true,
+                    }
                   : s
               )
             );
-            if (syncFolderId) {
-              await notifyPlaybookImportersIfShared(
-                supabase,
-                String(syncFolderId),
-                { notifyImportersOnCopyUpdates: true }
-              );
-            }
+            await syncSharedPlaybookAndNotifyFromScreenshotId(
+              supabase,
+              selectedImage.id
+            );
             return;
           }
         }
@@ -2025,24 +2191,31 @@ export default function DashboardPage() {
           setScreenshots((prev) =>
             prev.map((s) =>
               s.id === selectedImage.id
-                ? { ...s, annotations: payloadObject, annotation: payloadObject }
+                ? {
+                    ...s,
+                    annotations: payloadObject,
+                    annotation: payloadObject,
+                    is_updated: true,
+                  }
                 : s
             )
           );
           setAllScreenshots((prev: any[]) =>
             prev.map((s) =>
               s.id === selectedImage.id
-                ? { ...s, annotations: payloadObject, annotation: payloadObject }
+                ? {
+                    ...s,
+                    annotations: payloadObject,
+                    annotation: payloadObject,
+                    is_updated: true,
+                  }
                 : s
             )
           );
-          if (syncFolderId) {
-            await notifyPlaybookImportersIfShared(
-              supabase,
-              String(syncFolderId),
-              { notifyImportersOnCopyUpdates: true }
-            );
-          }
+          await syncSharedPlaybookAndNotifyFromScreenshotId(
+            supabase,
+            selectedImage.id
+          );
           return;
         }
         setError(
@@ -2055,23 +2228,32 @@ export default function DashboardPage() {
       setScreenshots((prev) =>
         prev.map((s) =>
           s.id === selectedImage.id
-            ? { ...s, annotations: payloadObject, annotation: payloadObject }
+            ? {
+                ...s,
+                annotations: payloadObject,
+                annotation: payloadObject,
+                is_updated: true,
+              }
             : s
         )
       );
       setAllScreenshots((prev: any[]) =>
         prev.map((s) =>
           s.id === selectedImage.id
-            ? { ...s, annotations: payloadObject, annotation: payloadObject }
+            ? {
+                ...s,
+                annotations: payloadObject,
+                annotation: payloadObject,
+                is_updated: true,
+              }
             : s
         )
       );
 
-      if (syncFolderId) {
-        await notifyPlaybookImportersIfShared(supabase, String(syncFolderId), {
-          notifyImportersOnCopyUpdates: true,
-        });
-      }
+      await syncSharedPlaybookAndNotifyFromScreenshotId(
+        supabase,
+        selectedImage.id
+      );
     } finally {
       setSavingAnnotation(false);
     }
@@ -2094,9 +2276,8 @@ export default function DashboardPage() {
     setShowMoveMenu(false);
 
     await fetchScreenshots();
-    // Sync importers when setups land in a shared playbook (subfolder OK). DB trigger
-    // `screenshots_folder_change_notify_importers` can also call this after folder_id updates.
-    await notifyPlaybookImportersIfShared(supabase, String(folderId));
+    // DB trigger may also sync + notify; debounced notify skips duplicates within 30s.
+    await syncSharedPlaybookAndNotifyImporters(supabase, String(folderId));
   }
 
   const commandViewResults = useMemo(() => {
@@ -2143,6 +2324,18 @@ export default function DashboardPage() {
     [commandViewResults, commandScreenshotResults]
   );
 
+  const newScreenshotCountByFolderId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of allScreenshots as ScreenshotRow[]) {
+      if (s.is_new !== true) continue;
+      const fid = s.folder_id;
+      if (fid == null || fid === "") continue;
+      const k = String(fid);
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [allScreenshots]);
+
   function folderMatchesParent(f: { parent_id?: string | null }, parentId: string | null) {
     if (parentId == null) {
       return f.parent_id == null;
@@ -2156,6 +2349,8 @@ export default function DashboardPage() {
       .map((folder: any) => {
         const isExpanded = expandedFolders.has(String(folder.id));
         const isActive = activeFolderId === folder.id;
+        const newInFolder =
+          newScreenshotCountByFolderId.get(String(folder.id)) ?? 0;
 
         return (
           <div key={folder.id}>
@@ -2193,7 +2388,10 @@ export default function DashboardPage() {
                 setHoverFolderId(null);
                 setSelectedIds([]);
                 await fetchScreenshots();
-                await notifyPlaybookImportersIfShared(supabase, String(folder.id));
+                await syncSharedPlaybookAndNotifyImporters(
+                  supabase,
+                  String(folder.id)
+                );
               }}
             >
               {hasChildren(String(folder.id)) ? (
@@ -2215,18 +2413,29 @@ export default function DashboardPage() {
 
               <span
                 onClick={() => setActiveFolderId(folder.id)}
-                className="min-w-0 flex-1 truncate text-sm"
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
               >
-                📁 {folder.name}
+                <span className="min-w-0 truncate">
+                  📁 {folder.name}
+                </span>
                 {folder.is_imported ? (
                   <span
-                    className={`ml-1.5 align-middle text-[10px] font-semibold uppercase tracking-wide ${
+                    className={`shrink-0 align-middle text-[10px] font-semibold uppercase tracking-wide ${
                       isActive
                         ? "rounded bg-white/20 px-1 py-0.5 text-white/90"
                         : "rounded bg-amber-100 px-1 py-0.5 text-amber-900"
                     }`}
                   >
                     Imported
+                  </span>
+                ) : null}
+                {newInFolder > 0 ? (
+                  <span
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-white ${
+                      isActive ? "bg-blue-500" : "bg-blue-600"
+                    }`}
+                  >
+                    {newInFolder} new
                   </span>
                 ) : null}
               </span>
@@ -2987,26 +3196,49 @@ export default function DashboardPage() {
                         No notifications
                       </div>
                     ) : (
-                      notifications.map((n) => (
-                        <div
-                          key={n.id}
-                          className={`border-b border-gray-100 p-3 text-sm last:border-b-0 ${
-                            n.is_read ? "text-gray-500" : "font-medium text-gray-900"
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <span
-                              className="shrink-0 text-base leading-snug"
-                              aria-hidden
+                      notifications.map((n) => {
+                        const openable = canOpenPlaybookFromNotification(n);
+                        return (
+                          <div
+                            key={n.id}
+                            className={`border-b border-gray-100 last:border-b-0 ${
+                              openable
+                                ? "cursor-pointer transition hover:bg-gray-50"
+                                : ""
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              disabled={!openable}
+                              onClick={() => {
+                                if (openable) void openPlaybookFromNotification(n);
+                              }}
+                              className={`w-full p-3 text-left text-sm ${
+                                n.is_read
+                                  ? "text-gray-500"
+                                  : "font-medium text-gray-900"
+                              } ${openable ? "" : "cursor-default"}`}
                             >
-                              {getNotificationIcon(n.type)}
-                            </span>
-                            <span className="min-w-0 flex-1 leading-snug">
-                              {n.message ?? n.type ?? "Notification"}
-                            </span>
+                              <div className="flex items-start gap-2">
+                                <span
+                                  className="shrink-0 text-base leading-snug"
+                                  aria-hidden
+                                >
+                                  {getNotificationIcon(n.type)}
+                                </span>
+                                <span className="min-w-0 flex-1 leading-snug">
+                                  {n.message ?? n.type ?? "Notification"}
+                                </span>
+                                {openable && (
+                                  <span className="shrink-0 text-[10px] text-blue-600">
+                                    Open →
+                                  </span>
+                                )}
+                              </div>
+                            </button>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
 
@@ -3279,8 +3511,16 @@ export default function DashboardPage() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-                  {filteredScreenshots.map((shot, index) => (
+                <div
+                  ref={screenshotsGridRef}
+                  className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
+                >
+                  {filteredScreenshots.map((shot, index) => {
+                    const highlightNew = shot.is_new === true;
+                    const highlightUpdated =
+                      shot.is_updated === true && !highlightNew;
+
+                    return (
                     <div
                       key={shot.id}
                       draggable
@@ -3357,7 +3597,13 @@ export default function DashboardPage() {
 
                         setSelectedIndex(index);
                       }}
-                      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md ${
+                      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md ${
+                        highlightNew
+                          ? "border-blue-400/75 bg-gradient-to-b from-blue-50/90 to-white shadow-[0_0_0_1px_rgba(59,130,246,0.12)] animate-card-highlight-new"
+                          : highlightUpdated
+                            ? "border-amber-400/75 bg-gradient-to-b from-amber-50/90 to-white shadow-[0_0_0_1px_rgba(245,158,11,0.12)] animate-card-highlight-updated"
+                            : "border-gray-200 bg-white"
+                      } ${
                         selectedIds.length > 0 ? "cursor-pointer" : ""
                       } ${
                         selectedIds.includes(shot.id)
@@ -3370,7 +3616,30 @@ export default function DashboardPage() {
                           ✓
                         </div>
                       )}
-                      <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+                      <div
+                        className={`relative h-48 w-full overflow-hidden ${
+                          highlightNew
+                            ? "bg-blue-100/40"
+                            : highlightUpdated
+                              ? "bg-amber-100/40"
+                              : "bg-gray-100"
+                        }`}
+                      >
+                        {shot.is_new === true ? (
+                          <span
+                            className="pointer-events-none absolute left-2 top-2 z-10 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm"
+                            aria-label="New"
+                          >
+                            NEW
+                          </span>
+                        ) : shot.is_updated === true ? (
+                          <span
+                            className="pointer-events-none absolute left-2 top-2 z-10 rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm"
+                            aria-label="Updated"
+                          >
+                            UPDATED
+                          </span>
+                        ) : null}
                         <img
                           src={shot.image_url}
                           draggable={false}
@@ -3409,7 +3678,8 @@ export default function DashboardPage() {
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>
