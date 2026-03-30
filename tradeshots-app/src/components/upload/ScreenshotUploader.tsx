@@ -3,6 +3,7 @@
 import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { syncSharedPlaybookAndNotifyImporters } from "@/lib/notifyPlaybookUpdate";
+import { X } from "lucide-react";
 
 export default function ScreenshotUploader({
   folderId,
@@ -224,9 +225,9 @@ export default function ScreenshotUploader({
                 type="button"
                 aria-label={`Remove tag ${tag}`}
                 onClick={() => removeTag(tag)}
-                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gray-300 text-[10px] leading-none text-gray-800 hover:bg-gray-400"
+                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gray-300 text-[10px] leading-none text-gray-600 transition-colors duration-150 ease-in-out hover:bg-gray-100 hover:text-black cursor-pointer"
               >
-                ×
+                <X className="w-4 h-4" aria-hidden />
               </button>
             </span>
           ))}
@@ -284,10 +285,10 @@ export default function ScreenshotUploader({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         className={`
-cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-200 ease-out
+cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-150 ease-in-out
 ${isDragActive
   ? "border-gray-900 bg-gray-100 scale-[1.01]"
-  : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+  : "border-gray-300 hover:border-gray-400 hover:bg-gray-100"
 }
 ${isUploading ? "pointer-events-none opacity-50" : ""}
 `.trim()}
@@ -308,7 +309,7 @@ ${isUploading ? "pointer-events-none opacity-50" : ""}
 
       {successMessage && (
         <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 transition">
-          Screenshot uploaded successfully ✓
+          Screenshot uploaded successfully
         </div>
       )}
 

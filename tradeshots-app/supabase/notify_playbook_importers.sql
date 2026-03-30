@@ -108,29 +108,8 @@ begin
             annotations = src.annotations,
             tags = coalesce(src.tags, dst.tags),
             source_screenshot_id = coalesce(dst.source_screenshot_id, src.id),
-            is_updated = (
-              (src.notes is distinct from dst.notes)
-              or (src.annotation is distinct from dst.annotation)
-              or (src.annotations is distinct from dst.annotations)
-              or (
-                (
-                  select coalesce(
-                    string_agg(ta.key || chr(1) || ta.value, chr(30) order by ta.key, ta.value),
-                    ''
-                  )
-                  from public.trade_attributes ta
-                  where ta.screenshot_id = src.id
-                ) is distinct from
-                (
-                  select coalesce(
-                    string_agg(ta2.key || chr(1) || ta2.value, chr(30) order by ta2.key, ta2.value),
-                    ''
-                  )
-                  from public.trade_attributes ta2
-                  where ta2.screenshot_id = dst.id
-                )
-              )
-            )
+            -- Importer copy: always mark updated when syncing from author (reliable UPDATED badge).
+            is_updated = true
           from public.screenshots as src
           where dst.id = dest_id
             and src.id = s.id;
@@ -141,27 +120,7 @@ begin
               notes = src.notes,
               tags = coalesce(src.tags, dst.tags),
               source_screenshot_id = coalesce(dst.source_screenshot_id, src.id),
-              is_updated = (
-                (src.notes is distinct from dst.notes)
-                or (
-                  (
-                    select coalesce(
-                      string_agg(ta.key || chr(1) || ta.value, chr(30) order by ta.key, ta.value),
-                      ''
-                    )
-                    from public.trade_attributes ta
-                    where ta.screenshot_id = src.id
-                  ) is distinct from
-                  (
-                    select coalesce(
-                      string_agg(ta2.key || chr(1) || ta2.value, chr(30) order by ta2.key, ta2.value),
-                      ''
-                    )
-                    from public.trade_attributes ta2
-                    where ta2.screenshot_id = dst.id
-                  )
-                )
-              )
+              is_updated = true
             from public.screenshots as src
             where dst.id = dest_id
               and src.id = s.id;

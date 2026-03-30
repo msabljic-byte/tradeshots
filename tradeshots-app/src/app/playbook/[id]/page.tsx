@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotModal from "@/components/ScreenshotModal";
+import { Image as ImageIcon } from "lucide-react";
 
 type ScreenshotRow = {
   id: string;
@@ -93,17 +94,33 @@ export default function PublicPlaybookPage() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [toastExiting, setToastExiting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
+  const toastExitTimeoutRef = useRef<number | null>(null);
 
   function showToast(message: string) {
     setToast(message);
+    setToastExiting(false);
     if (toastTimeoutRef.current) {
       window.clearTimeout(toastTimeoutRef.current);
     }
+    if (toastExitTimeoutRef.current) {
+      window.clearTimeout(toastExitTimeoutRef.current);
+    }
+
+    const TOAST_TOTAL_MS = 3200;
+    const TOAST_OUT_START_MS = 3000;
+
+    toastExitTimeoutRef.current = window.setTimeout(() => {
+      setToastExiting(true);
+    }, TOAST_OUT_START_MS);
+
     toastTimeoutRef.current = window.setTimeout(() => {
       setToast(null);
       toastTimeoutRef.current = null;
+      toastExitTimeoutRef.current = null;
+      setToastExiting(false);
     }, 3200);
   }
 
@@ -111,6 +128,9 @@ export default function PublicPlaybookPage() {
     return () => {
       if (toastTimeoutRef.current) {
         window.clearTimeout(toastTimeoutRef.current);
+      }
+      if (toastExitTimeoutRef.current) {
+        window.clearTimeout(toastExitTimeoutRef.current);
       }
     };
   }, []);
@@ -134,6 +154,26 @@ export default function PublicPlaybookPage() {
 
     setImporting(true);
     try {
+      // If this user already imported this shared playbook, don't allow importing again.
+      // (DB should enforce this too via a unique constraint; this is the friendly UX guard.)
+      const { data: existingImports, error: existingErr } = await supabase
+        .from("user_playbooks")
+        .select("copy_folder_id")
+        .eq("user_id", userId)
+        .eq("source_folder_id", sourceFolderId)
+        .limit(1);
+
+      if (existingErr && !isOptionalSchemaMissing(existingErr)) {
+        showToast(existingErr.message);
+        return;
+      }
+
+      if (existingImports && existingImports.length > 0) {
+        showToast("You already imported this playbook.");
+        router.push("/dashboard");
+        return;
+      }
+
       const { data: nameRows, error: namesErr } = await supabase
         .from("folders")
         .select("name")
@@ -279,7 +319,7 @@ export default function PublicPlaybookPage() {
         console.warn("notifications insert:", notifErr.message);
       }
 
-      showToast("Playbook imported ✓");
+      showToast("Playbook imported");
       router.push("/dashboard");
     } finally {
       setImporting(false);
@@ -387,7 +427,7 @@ export default function PublicPlaybookPage() {
             Powered by Tradeshots
           </div>
 
-          <h1 className="text-3xl font-semibold text-gray-900">{folder.name}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{folder.name}</h1>
 
           {folder.description && (
             <p className="mx-auto mt-4 max-w-2xl text-gray-600">{folder.description}</p>
@@ -430,7 +470,7 @@ export default function PublicPlaybookPage() {
                 type="button"
                 disabled={importing}
                 onClick={() => void syncPlaybook()}
-                className="rounded-lg bg-gray-900 px-6 py-2 text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {importing ? "Importing…" : "Import Playbook"}
               </button>
@@ -446,7 +486,11 @@ export default function PublicPlaybookPage() {
         </div>
 
         {toast && (
-          <div className="animate-fade-in fixed bottom-6 left-1/2 z-[9999] -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
+          <div
+            className={`fixed bottom-6 left-1/2 z-[9999] -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg ${
+              toastExiting ? "animate-toast-out" : "animate-toast-in"
+            }`}
+          >
             {toast}
           </div>
         )}
@@ -464,7 +508,7 @@ export default function PublicPlaybookPage() {
         </div>
 
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold text-gray-900">{folder.name}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{folder.name}</h1>
           {folder.description && (
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
               {folder.description}
@@ -484,7 +528,18 @@ export default function PublicPlaybookPage() {
 
         {screenshots.length === 0 ? (
           <div className="py-20 text-center text-gray-500">
-            <p className="text-sm">No screenshots in this playbook</p>
+            <div className="mx-auto mb-3 text-2xl" aria-hidden>
+              <ImageIcon
+                className="mx-auto h-5 w-5 text-gray-600"
+                aria-hidden
+              />
+            </div>
+            <p className="text-sm font-medium text-gray-900">
+              No screenshots yet in this playbook
+            </p>
+            <p className="mt-2 text-xs text-gray-500">
+              Check back later or import it to start building.
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
@@ -493,7 +548,7 @@ export default function PublicPlaybookPage() {
                 key={shot.id}
                 type="button"
                 onClick={() => setSelectedIndex(index)}
-                className="group cursor-pointer overflow-hidden rounded-xl bg-white shadow-sm transition hover:shadow-md"
+                className="group cursor-pointer overflow-hidden rounded-xl bg-white shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-100 hover:shadow-md"
               >
                 <img
                   src={shot.image_url}
@@ -516,7 +571,11 @@ export default function PublicPlaybookPage() {
         )}
 
         {toast && (
-          <div className="animate-fade-in fixed bottom-6 left-1/2 z-[9999] -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
+          <div
+            className={`fixed bottom-6 left-1/2 z-[9999] -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg ${
+              toastExiting ? "animate-toast-out" : "animate-toast-in"
+            }`}
+          >
             {toast}
           </div>
         )}

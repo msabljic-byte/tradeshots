@@ -98,7 +98,7 @@ export default function UpdatePasswordPage() {
     <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6 font-sans">
       <div className="mx-auto w-full max-w-md">
         <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-md">
-          <h1 className="mb-6 text-3xl font-semibold text-gray-900">
+          <h1 className="mb-6 text-2xl font-bold text-gray-900">
             Update password
           </h1>
 

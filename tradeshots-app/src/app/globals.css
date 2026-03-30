@@ -22,7 +22,9 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-size: 14px; /* 0.875rem = Tailwind text-sm */
+  line-height: 1.5; /* Tailwind leading-6 */
 }
 
 @layer base {
@@ -38,8 +40,84 @@ body {
     cursor: not-allowed;
   }
 
+  button:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.98);
+    will-change: transform;
+  }
+
   label[for] {
     cursor: pointer;
+  }
+
+  /* Global typography baseline (keeps hierarchy clean & readable). */
+  h1 {
+    @apply text-2xl font-bold leading-tight tracking-tight;
+  }
+  h2,
+  h3 {
+    @apply text-lg font-semibold leading-snug;
+  }
+  p {
+    @apply text-sm leading-6;
+  }
+  small {
+    @apply text-xs text-gray-500 leading-4;
+  }
+}
+
+@layer components {
+  /* Layout helpers (opt-in): use these to keep spacing consistent. */
+  .app-container {
+    @apply p-4 sm:p-6;
+  }
+  .app-stack {
+    @apply flex flex-col gap-6;
+  }
+  .app-stack-tight {
+    @apply flex flex-col gap-4;
+  }
+
+  /* Typography helpers (opt-in): use these for consistent hierarchy. */
+  .app-page-title {
+    @apply text-2xl font-bold leading-tight tracking-tight;
+  }
+  .app-section-title {
+    @apply text-lg font-semibold leading-snug;
+  }
+  .app-body {
+    @apply text-sm leading-6;
+  }
+  .app-secondary {
+    @apply text-xs text-gray-500 leading-4;
+  }
+
+  /* Premium button system */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 ease-in-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-gray-300;
+  }
+  .btn-primary {
+    @apply bg-black text-white hover:bg-gray-800;
+  }
+  .btn-secondary {
+    @apply bg-gray-100 text-gray-900 hover:bg-gray-200;
+  }
+  .btn-subtle {
+    @apply bg-transparent text-gray-600 hover:text-black;
+  }
+
+  /* Dropdown / popover entry animation (for conditional renders). */
+  @keyframes dropdownIn {
+    from {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  .animate-dropdown-in {
+    animation: dropdownIn 0.15s ease-in-out both;
   }
 }
 
@@ -65,8 +143,27 @@ body {
   }
 }
 
+@keyframes toastFadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
 .animate-fade-in {
   animation: toastFadeIn 0.2s ease-out;
+}
+
+.animate-toast-in {
+  animation: toastFadeIn 0.18s ease-in-out both;
+}
+
+.animate-toast-out {
+  animation: toastFadeOut 0.18s ease-in-out both;
 }
 
 /* One-shot glow when a card is new or updated (first paint only). */
@@ -106,9 +203,27 @@ body {
   animation: cardHighlightUpdated 1.75s ease-in-out 1;
 }
 
+/* Optional NEW pulse for "fresh content" badges. */
+@keyframes newPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+.animate-new-pulse {
+  animation: newPulse 1.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-card-highlight-new,
   .animate-card-highlight-updated {
+    animation: none;
+  }
+  .animate-new-pulse {
     animation: none;
   }
 }

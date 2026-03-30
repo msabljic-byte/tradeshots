@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
 export type AnnotationShape =
   | {
@@ -294,24 +295,29 @@ export default function ScreenshotModal({
   const canNext = index < screenshots.length - 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex bg-black/40 backdrop-blur-sm transition-opacity duration-150 ease-in-out">
       <div
         className="absolute inset-0 z-0 cursor-pointer"
         onClick={() => setIndex(null)}
       />
 
-      <div className="relative z-10 flex min-h-0 min-w-0 h-full w-full overflow-hidden bg-white shadow-xl">
+      <div
+        className="relative z-10 flex min-h-0 min-w-0 h-full w-full overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl animate-[fadeIn_0.2s_ease-out_both]"
+        role="dialog"
+        aria-modal="true"
+      >
         <button
           type="button"
           onClick={() => setIndex(null)}
-          className="absolute right-4 top-4 z-50 rounded bg-black/50 px-3 py-1 text-sm text-white hover:bg-black/70"
+          aria-label="Close modal"
+          className="absolute right-4 top-4 z-50 flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-white/30"
         >
-          ✕
+          <X className="w-5 h-5" aria-hidden />
         </button>
 
         {/* LEFT: image + annotation canvas */}
         <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
-          <div className="relative flex h-full min-h-0 w-full items-center justify-center p-2">
+          <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4">
             <div className="relative inline-block max-h-full max-w-full">
               <img
                 ref={imgRef}
@@ -331,25 +337,25 @@ export default function ScreenshotModal({
             <button
               type="button"
               onClick={() => setIndex((i) => (i === null ? 0 : i - 1))}
-              className="absolute left-4 top-1/2 -translate-y-1/2 rounded bg-black/50 px-3 py-2 text-white hover:bg-black/70"
+              className="absolute left-4 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900"
             >
-              ←
+              <ChevronLeft className="w-5 h-5" aria-hidden />
             </button>
           )}
           {canNext && (
             <button
               type="button"
               onClick={() => setIndex((i) => (i === null ? 0 : i + 1))}
-              className="absolute right-4 top-1/2 -translate-y-1/2 rounded bg-black/50 px-3 py-2 text-white hover:bg-black/70"
+              className="absolute right-4 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900"
             >
-              →
+              <ChevronRight className="w-5 h-5" aria-hidden />
             </button>
           )}
         </div>
 
         {/* RIGHT: read-only details */}
-        <div className="w-[380px] shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-4">
-          <div className="mb-4">
+        <div className="w-[380px] shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-6">
+          <div className="mb-5">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
               Details
             </p>
@@ -375,7 +381,7 @@ export default function ScreenshotModal({
               </div>
             ))}
             {(!screenshot.attributes || screenshot.attributes.length === 0) && (
-              <div className="text-sm text-gray-500">No attributes</div>
+              <div className="text-sm text-gray-500">No attributes yet</div>
             )}
           </div>
 
