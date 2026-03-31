@@ -106,6 +106,12 @@ begin
             notes = src.notes,
             annotation = src.annotation,
             annotations = src.annotations,
+            voice_memo_url = src.voice_memo_url,
+            voice_memo_path = src.voice_memo_path,
+            voice_memo_duration_ms = src.voice_memo_duration_ms,
+            voice_memo_mime_type = src.voice_memo_mime_type,
+            voice_memo_size_bytes = src.voice_memo_size_bytes,
+            voice_memo_updated_at = src.voice_memo_updated_at,
             tags = coalesce(src.tags, dst.tags),
             source_screenshot_id = coalesce(dst.source_screenshot_id, src.id),
             -- Importer copy: always mark updated when syncing from author (reliable UPDATED badge).
@@ -118,6 +124,12 @@ begin
             update public.screenshots as dst
             set
               notes = src.notes,
+              voice_memo_url = src.voice_memo_url,
+              voice_memo_path = src.voice_memo_path,
+              voice_memo_duration_ms = src.voice_memo_duration_ms,
+              voice_memo_mime_type = src.voice_memo_mime_type,
+              voice_memo_size_bytes = src.voice_memo_size_bytes,
+              voice_memo_updated_at = src.voice_memo_updated_at,
               tags = coalesce(src.tags, dst.tags),
               source_screenshot_id = coalesce(dst.source_screenshot_id, src.id),
               is_updated = true
@@ -150,6 +162,12 @@ begin
           tags,
           annotation,
           annotations,
+          voice_memo_url,
+          voice_memo_path,
+          voice_memo_duration_ms,
+          voice_memo_mime_type,
+          voice_memo_size_bytes,
+          voice_memo_updated_at,
           source_screenshot_id,
           is_new,
           is_updated
@@ -162,6 +180,12 @@ begin
           s.tags,
           s.annotation,
           s.annotations,
+          s.voice_memo_url,
+          s.voice_memo_path,
+          s.voice_memo_duration_ms,
+          s.voice_memo_mime_type,
+          s.voice_memo_size_bytes,
+          s.voice_memo_updated_at,
           s.id,
           true,
           coalesce(s.is_updated, false)
@@ -177,6 +201,12 @@ begin
               notes,
               tags,
               source_screenshot_id,
+              voice_memo_url,
+              voice_memo_path,
+              voice_memo_duration_ms,
+              voice_memo_mime_type,
+              voice_memo_size_bytes,
+              voice_memo_updated_at,
               is_new,
               is_updated
             )
@@ -187,6 +217,12 @@ begin
               s.notes,
               s.tags,
               s.id,
+              s.voice_memo_url,
+              s.voice_memo_path,
+              s.voice_memo_duration_ms,
+              s.voice_memo_mime_type,
+              s.voice_memo_size_bytes,
+              s.voice_memo_updated_at,
               true,
               coalesce(s.is_updated, false)
             )
@@ -221,6 +257,12 @@ begin
           notes = src.notes,
           annotation = src.annotation,
           annotations = src.annotations,
+            voice_memo_url = src.voice_memo_url,
+            voice_memo_path = src.voice_memo_path,
+            voice_memo_duration_ms = src.voice_memo_duration_ms,
+            voice_memo_mime_type = src.voice_memo_mime_type,
+            voice_memo_size_bytes = src.voice_memo_size_bytes,
+            voice_memo_updated_at = src.voice_memo_updated_at,
           tags = coalesce(src.tags, dst.tags),
           is_updated = coalesce(src.is_updated, false)
         from public.screenshots as src
@@ -231,6 +273,12 @@ begin
           update public.screenshots as dst
           set
             notes = src.notes,
+            voice_memo_url = src.voice_memo_url,
+            voice_memo_path = src.voice_memo_path,
+            voice_memo_duration_ms = src.voice_memo_duration_ms,
+            voice_memo_mime_type = src.voice_memo_mime_type,
+            voice_memo_size_bytes = src.voice_memo_size_bytes,
+            voice_memo_updated_at = src.voice_memo_updated_at,
             tags = coalesce(src.tags, dst.tags),
             is_updated = coalesce(src.is_updated, false)
           from public.screenshots as src

@@ -55,10 +55,25 @@ type ScreenshotLike = {
   created_at?: string;
   tags?: string[] | null;
   notes?: string | null;
+  source_screenshot_id?: string | null;
+  voice_memo_url?: string | null;
+  voice_memo_duration_ms?: number | null;
+  private_voice_memo_url?: string | null;
+  private_voice_memo_duration_ms?: number | null;
   annotation?: unknown; // legacy
   annotations?: unknown; // structured
   attributes?: Array<{ name: string; value: string }>;
 };
+
+function formatVoiceDuration(durationMs: number | null | undefined): string | null {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return null;
+  }
+  const sec = Math.round(durationMs / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 function parseAnnotationValue(raw: unknown): {
   image: string;
@@ -293,6 +308,11 @@ export default function ScreenshotModal({
 
   const canPrev = index > 0;
   const canNext = index < screenshots.length - 1;
+  const effectiveVoiceMemoUrl =
+    screenshot.private_voice_memo_url ?? screenshot.voice_memo_url ?? null;
+  const effectiveDuration =
+    screenshot.private_voice_memo_duration_ms ?? screenshot.voice_memo_duration_ms ?? null;
+  const hasPrivateMemo = Boolean(screenshot.private_voice_memo_url);
 
   return (
     <div className="fixed inset-0 z-50 flex bg-black/40 backdrop-blur-sm transition-opacity duration-150 ease-in-out">
@@ -370,6 +390,23 @@ export default function ScreenshotModal({
             {screenshot.notes && (
               <div className="text-sm text-gray-700">
                 <span className="font-medium">Notes:</span> {screenshot.notes}
+              </div>
+            )}
+            {effectiveVoiceMemoUrl && (
+              <div className="pt-1">
+                <div className="mb-1 text-sm text-gray-700">
+                  <span className="font-medium">Voice memo:</span>{" "}
+                  {hasPrivateMemo ? "Private" : "Source"}
+                  {formatVoiceDuration(effectiveDuration)
+                    ? ` (${formatVoiceDuration(effectiveDuration)})`
+                    : ""}
+                </div>
+                <audio controls src={effectiveVoiceMemoUrl} className="w-full" />
+                {readOnly && screenshot.source_screenshot_id && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Playback only in shared/imported view.
+                  </p>
+                )}
               </div>
             )}
           </div>

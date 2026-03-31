@@ -13,6 +13,13 @@ type ScreenshotRow = {
   created_at: string;
   notes?: string | null;
   tags?: string[] | null;
+  source_screenshot_id?: string | null;
+  voice_memo_url?: string | null;
+  voice_memo_path?: string | null;
+  voice_memo_duration_ms?: number | null;
+  voice_memo_mime_type?: string | null;
+  voice_memo_size_bytes?: number | null;
+  voice_memo_updated_at?: string | null;
   annotation?: unknown;
   annotations?: unknown;
   attributes?: Array<{ name: string; value: string }>;
@@ -310,6 +317,12 @@ export default function PublicPlaybookPage() {
           image_url: s.image_url,
           notes: s.notes ?? null,
           tags: s.tags ?? null,
+          voice_memo_url: s.voice_memo_url ?? null,
+          voice_memo_path: s.voice_memo_path ?? null,
+          voice_memo_duration_ms: s.voice_memo_duration_ms ?? null,
+          voice_memo_mime_type: s.voice_memo_mime_type ?? null,
+          voice_memo_size_bytes: s.voice_memo_size_bytes ?? null,
+          voice_memo_updated_at: s.voice_memo_updated_at ?? null,
           source_screenshot_id: sourceShotId,
           is_new: true,
         };

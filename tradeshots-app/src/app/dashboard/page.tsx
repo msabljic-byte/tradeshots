@@ -50,6 +50,10 @@ import {
   Trash2,
   Upload,
   X,
+  Mic,
+  Play,
+  Pause,
+  Square as StopIcon,
   ArrowRight,
   Minus,
   MousePointer2,
@@ -70,6 +74,19 @@ type ScreenshotRow = {
   tags?: string[] | null;
   notes?: string | null;
   folder_id?: string | null;
+  source_screenshot_id?: string | null;
+  voice_memo_url?: string | null;
+  voice_memo_path?: string | null;
+  voice_memo_duration_ms?: number | null;
+  voice_memo_mime_type?: string | null;
+  voice_memo_size_bytes?: number | null;
+  voice_memo_updated_at?: string | null;
+  private_voice_memo_url?: string | null;
+  private_voice_memo_path?: string | null;
+  private_voice_memo_duration_ms?: number | null;
+  private_voice_memo_mime_type?: string | null;
+  private_voice_memo_size_bytes?: number | null;
+  private_voice_memo_updated_at?: string | null;
   annotation?: unknown; // legacy
   annotations?: unknown; // structured JSON (preferred)
   /** True for rows just synced from a shared playbook (highlight in UI). */
@@ -239,6 +256,25 @@ function parseTradeAttributeRow(
   return { key, value };
 }
 
+function isOptionalSchemaMissing(err: { message?: string } | null): boolean {
+  const m = (err?.message ?? "").toLowerCase();
+  return (
+    m.includes("schema cache") ||
+    m.includes("does not exist") ||
+    m.includes("could not find")
+  );
+}
+
+function formatVoiceMemoDuration(durationMs: number | null | undefined): string | null {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return null;
+  }
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 function buildAttributeMapFromRows(
   rows: Record<string, unknown>[]
 ): Record<string, Record<string, string[]>> {
@@ -343,6 +379,10 @@ export default function DashboardPage() {
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [savedNoteToast, setSavedNoteToast] = useState(false);
+  const [voiceMemoError, setVoiceMemoError] = useState<string | null>(null);
+  const [savingVoiceMemo, setSavingVoiceMemo] = useState(false);
+  const [isRecordingVoiceMemo, setIsRecordingVoiceMemo] = useState(false);
+  const [isPlayingVoiceMemo, setIsPlayingVoiceMemo] = useState(false);
   const [attributes, setAttributes] = useState<any[]>([]);
   const [undoData, setUndoData] = useState<{
     attribute: any;
@@ -376,13 +416,19 @@ export default function DashboardPage() {
   const [annotationShapes, setAnnotationShapes] = useState<AnnotationShape[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
+  const [hoveredResizeHandleIndex, setHoveredResizeHandleIndex] = useState<number | null>(
+    null
+  );
   const [isDraggingAnnotation, setIsDraggingAnnotation] = useState(false);
+  const [isResizingAnnotation, setIsResizingAnnotation] = useState(false);
   const [annotationBaseDataUrl, setAnnotationBaseDataUrl] = useState("");
   const [savingAnnotation, setSavingAnnotation] = useState(false);
   const drawStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const currentPathRef = useRef<Array<{ x: number; y: number }>>([]);
   const isDrawingRef = useRef(false);
   const isDraggingAnnotationRef = useRef(false);
+  const isResizingAnnotationRef = useRef(false);
+  const resizeHandleIndexRef = useRef<number | null>(null);
   const dragStartPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragStartShapeRef = useRef<AnnotationShape | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
@@ -391,6 +437,10 @@ export default function DashboardPage() {
   const annotationSaveTimeoutRef = useRef<number | null>(null);
   const noteSaveTimeoutRef = useRef<number | null>(null);
   const attributeSaveTimeoutRef = useRef<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const audioPlaybackRef = useRef<HTMLAudioElement | null>(null);
   const lastAnnotationFingerprintRef = useRef("");
   const lastNoteByScreenshotRef = useRef<Record<string, string>>({});
   const lastAttributesByScreenshotRef = useRef<Record<string, string>>({});
@@ -600,7 +650,7 @@ export default function DashboardPage() {
     const initial = await supabase
       .from("screenshots")
       .select(
-        "id, image_url, created_at, tags, notes, folder_id, annotations, annotation, is_new, is_updated"
+        "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, annotations, annotation, is_new, is_updated, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
       )
       .eq("user_id", user.id)
       .order("created_at", {
@@ -617,7 +667,9 @@ export default function DashboardPage() {
     ) {
       const fallbackLegacy = await supabase
         .from("screenshots")
-        .select("id, image_url, created_at, tags, notes, folder_id, annotation, is_new, is_updated")
+        .select(
+          "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, annotation, is_new, is_updated, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
+        )
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
@@ -632,7 +684,9 @@ export default function DashboardPage() {
     ) {
       const fallbackBase = await supabase
         .from("screenshots")
-        .select("id, image_url, created_at, tags, notes, folder_id, is_new, is_updated")
+        .select(
+          "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, is_new, is_updated, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
+        )
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
@@ -647,7 +701,7 @@ export default function DashboardPage() {
       setAttributeKeyValuesByScreenshot({});
     } else {
       setError(null);
-      const allRows = (data ?? []) as any[];
+      const allRows = (data ?? []) as ScreenshotRow[];
       const hydratedRows = allRows.map((row) => {
         const sid = String(row?.id ?? "");
         if (!sid) return row;
@@ -659,11 +713,45 @@ export default function DashboardPage() {
           annotation: local,
         };
       });
-      setAllScreenshots(hydratedRows);
+      const allIds = hydratedRows.map((row) => row.id);
+      const privateMemoByScreenshot: Record<string, Partial<ScreenshotRow>> = {};
+      if (allIds.length > 0) {
+        const { data: privateRows, error: privateErr } = await supabase
+          .from("screenshot_private_voice_memos")
+          .select(
+            "screenshot_id, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, updated_at"
+          )
+          .in("screenshot_id", allIds);
+        if (!privateErr && privateRows) {
+          for (const row of privateRows as Record<string, unknown>[]) {
+            const sid = String(row.screenshot_id ?? "");
+            if (!sid) continue;
+            privateMemoByScreenshot[sid] = {
+              private_voice_memo_url: (row.voice_memo_url as string | null) ?? null,
+              private_voice_memo_path: (row.voice_memo_path as string | null) ?? null,
+              private_voice_memo_duration_ms:
+                (row.voice_memo_duration_ms as number | null) ?? null,
+              private_voice_memo_mime_type:
+                (row.voice_memo_mime_type as string | null) ?? null,
+              private_voice_memo_size_bytes:
+                (row.voice_memo_size_bytes as number | null) ?? null,
+              private_voice_memo_updated_at: (row.updated_at as string | null) ?? null,
+            };
+          }
+        } else if (privateErr && !isOptionalSchemaMissing(privateErr)) {
+          console.warn("screenshot_private_voice_memos:", privateErr.message);
+        }
+      }
+
+      const hydratedWithPrivate = hydratedRows.map((row) => ({
+        ...row,
+        ...(privateMemoByScreenshot[row.id] ?? {}),
+      }));
+      setAllScreenshots(hydratedWithPrivate);
 
       const screenshotRows = (activeFolderId
-        ? hydratedRows.filter((s) => s.folder_id === activeFolderId)
-        : hydratedRows) as ScreenshotRow[];
+        ? hydratedWithPrivate.filter((s) => s.folder_id === activeFolderId)
+        : hydratedWithPrivate) as ScreenshotRow[];
       setScreenshots(screenshotRows);
 
       const screenshotIds = screenshotRows.map((s) => s.id);
@@ -1448,6 +1536,8 @@ export default function DashboardPage() {
   useEffect(() => {
     if (selectedIndex === null) {
       setCurrentNote("");
+      setVoiceMemoError(null);
+      setIsPlayingVoiceMemo(false);
       return;
     }
 
@@ -1470,6 +1560,7 @@ export default function DashboardPage() {
 
     const shot = filtered[selectedIndex];
     setCurrentNote(shot?.notes ?? "");
+    setVoiceMemoError(null);
   }, [
     selectedIndex,
     screenshots,
@@ -1477,6 +1568,13 @@ export default function DashboardPage() {
     filters,
     attributesByScreenshot,
   ]);
+
+  useEffect(() => {
+    if (!audioPlaybackRef.current) return;
+    audioPlaybackRef.current.pause();
+    audioPlaybackRef.current.currentTime = 0;
+    setIsPlayingVoiceMemo(false);
+  }, [selectedIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1589,6 +1687,275 @@ export default function DashboardPage() {
       setTimeout(() => setSavedNoteToast(false), 1200);
     } finally {
       setSavingNote(false);
+    }
+  }
+
+  async function readVoiceMemoDurationMs(blob: Blob): Promise<number | null> {
+    return new Promise((resolve) => {
+      const audio = document.createElement("audio");
+      const objectUrl = URL.createObjectURL(blob);
+      audio.preload = "metadata";
+      audio.src = objectUrl;
+      audio.onloadedmetadata = () => {
+        const duration = Number.isFinite(audio.duration) ? audio.duration * 1000 : NaN;
+        URL.revokeObjectURL(objectUrl);
+        resolve(Number.isFinite(duration) && duration > 0 ? Math.round(duration) : null);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(null);
+      };
+    });
+  }
+
+  async function uploadVoiceMemoBlob(
+    screenshot: ScreenshotRow,
+    blob: Blob,
+    mode: "source" | "private"
+  ) {
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !authData.user) {
+      throw new Error(authErr?.message ?? "User not found.");
+    }
+    const userId = authData.user.id;
+    const durationMs = await readVoiceMemoDurationMs(blob);
+    const pathPrefix = mode === "private" ? "private" : "source";
+    const extension = blob.type.includes("ogg")
+      ? "ogg"
+      : blob.type.includes("mp4")
+        ? "m4a"
+        : "webm";
+    const filePath = `${pathPrefix}/${userId}/${screenshot.id}/${Date.now()}.${extension}`;
+    const previousPath =
+      mode === "private" ? screenshot.private_voice_memo_path : screenshot.voice_memo_path;
+
+    const uploadRes = await supabase.storage
+      .from("voice-memos")
+      .upload(filePath, blob, { contentType: blob.type || "audio/webm", upsert: false });
+    if (uploadRes.error) throw new Error(uploadRes.error.message);
+    const publicUrl = supabase.storage.from("voice-memos").getPublicUrl(filePath).data.publicUrl;
+
+    if (mode === "source") {
+      const { error: saveErr } = await supabase
+        .from("screenshots")
+        .update({
+          voice_memo_url: publicUrl,
+          voice_memo_path: filePath,
+          voice_memo_duration_ms: durationMs,
+          voice_memo_mime_type: blob.type || null,
+          voice_memo_size_bytes: blob.size,
+          voice_memo_updated_at: new Date().toISOString(),
+          is_updated: true,
+        })
+        .eq("id", screenshot.id);
+      if (saveErr) throw new Error(saveErr.message);
+    } else {
+      const { error: upsertErr } = await supabase
+        .from("screenshot_private_voice_memos")
+        .upsert(
+          {
+            screenshot_id: screenshot.id,
+            user_id: userId,
+            voice_memo_url: publicUrl,
+            voice_memo_path: filePath,
+            voice_memo_duration_ms: durationMs,
+            voice_memo_mime_type: blob.type || null,
+            voice_memo_size_bytes: blob.size,
+          },
+          { onConflict: "screenshot_id,user_id" }
+        );
+      if (upsertErr) throw new Error(upsertErr.message);
+    }
+
+    if (previousPath && previousPath !== filePath) {
+      const { error: removeErr } = await supabase.storage
+        .from("voice-memos")
+        .remove([previousPath]);
+      if (removeErr) {
+        console.warn("voice memo remove old:", removeErr.message);
+      }
+    }
+
+    const patch =
+      mode === "private"
+        ? {
+            private_voice_memo_url: publicUrl,
+            private_voice_memo_path: filePath,
+            private_voice_memo_duration_ms: durationMs,
+            private_voice_memo_mime_type: blob.type || null,
+            private_voice_memo_size_bytes: blob.size,
+            private_voice_memo_updated_at: new Date().toISOString(),
+          }
+        : {
+            voice_memo_url: publicUrl,
+            voice_memo_path: filePath,
+            voice_memo_duration_ms: durationMs,
+            voice_memo_mime_type: blob.type || null,
+            voice_memo_size_bytes: blob.size,
+            voice_memo_updated_at: new Date().toISOString(),
+            is_updated: true,
+          };
+
+    setScreenshots((prev) =>
+      prev.map((s) => (s.id === screenshot.id ? { ...s, ...patch } : s))
+    );
+    setAllScreenshots((prev: ScreenshotRow[]) =>
+      prev.map((s) => (s.id === screenshot.id ? { ...s, ...patch } : s))
+    );
+
+    if (mode === "source") {
+      await syncSharedPlaybookAndNotifyFromScreenshotId(supabase, screenshot.id);
+    }
+  }
+
+  async function deleteVoiceMemo(
+    screenshot: ScreenshotRow,
+    mode: "source" | "private"
+  ): Promise<void> {
+    const path = mode === "private" ? screenshot.private_voice_memo_path : screenshot.voice_memo_path;
+    if (path) {
+      const { error: removeErr } = await supabase.storage.from("voice-memos").remove([path]);
+      if (removeErr) console.warn("voice memo delete:", removeErr.message);
+    }
+
+    if (mode === "source") {
+      const { error: clearErr } = await supabase
+        .from("screenshots")
+        .update({
+          voice_memo_url: null,
+          voice_memo_path: null,
+          voice_memo_duration_ms: null,
+          voice_memo_mime_type: null,
+          voice_memo_size_bytes: null,
+          voice_memo_updated_at: null,
+          is_updated: true,
+        })
+        .eq("id", screenshot.id);
+      if (clearErr) throw new Error(clearErr.message);
+      setScreenshots((prev) =>
+        prev.map((s) =>
+          s.id === screenshot.id
+            ? {
+                ...s,
+                voice_memo_url: null,
+                voice_memo_path: null,
+                voice_memo_duration_ms: null,
+                voice_memo_mime_type: null,
+                voice_memo_size_bytes: null,
+                voice_memo_updated_at: null,
+                is_updated: true,
+              }
+            : s
+        )
+      );
+      setAllScreenshots((prev: ScreenshotRow[]) =>
+        prev.map((s) =>
+          s.id === screenshot.id
+            ? {
+                ...s,
+                voice_memo_url: null,
+                voice_memo_path: null,
+                voice_memo_duration_ms: null,
+                voice_memo_mime_type: null,
+                voice_memo_size_bytes: null,
+                voice_memo_updated_at: null,
+                is_updated: true,
+              }
+            : s
+        )
+      );
+      await syncSharedPlaybookAndNotifyFromScreenshotId(supabase, screenshot.id);
+      return;
+    }
+
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !authData.user) throw new Error(authErr?.message ?? "User not found.");
+    const { error: delErr } = await supabase
+      .from("screenshot_private_voice_memos")
+      .delete()
+      .eq("screenshot_id", screenshot.id)
+      .eq("user_id", authData.user.id);
+    if (delErr) throw new Error(delErr.message);
+
+    setScreenshots((prev) =>
+      prev.map((s) =>
+        s.id === screenshot.id
+          ? {
+              ...s,
+              private_voice_memo_url: null,
+              private_voice_memo_path: null,
+              private_voice_memo_duration_ms: null,
+              private_voice_memo_mime_type: null,
+              private_voice_memo_size_bytes: null,
+              private_voice_memo_updated_at: null,
+            }
+          : s
+      )
+    );
+    setAllScreenshots((prev: ScreenshotRow[]) =>
+      prev.map((s) =>
+        s.id === screenshot.id
+          ? {
+              ...s,
+              private_voice_memo_url: null,
+              private_voice_memo_path: null,
+              private_voice_memo_duration_ms: null,
+              private_voice_memo_mime_type: null,
+              private_voice_memo_size_bytes: null,
+              private_voice_memo_updated_at: null,
+            }
+          : s
+      )
+    );
+  }
+
+  async function startVoiceMemoRecording(mode: "source" | "private") {
+    if (!selectedImage?.id) return;
+    if (!("MediaRecorder" in window) || !navigator.mediaDevices?.getUserMedia) {
+      setVoiceMemoError("Voice recording is not supported by this browser.");
+      return;
+    }
+    setVoiceMemoError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) recordingChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        recordingChunksRef.current = [];
+        setIsRecordingVoiceMemo(false);
+        if (blob.size > 0) {
+          setSavingVoiceMemo(true);
+          void uploadVoiceMemoBlob(selectedImage, blob, mode)
+            .catch((err: unknown) => {
+              setVoiceMemoError(err instanceof Error ? err.message : "Failed to save voice memo.");
+            })
+            .finally(() => setSavingVoiceMemo(false));
+        }
+        if (mediaStreamRef.current) {
+          mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+          mediaStreamRef.current = null;
+        }
+      };
+      recorder.start();
+      setIsRecordingVoiceMemo(true);
+    } catch (err) {
+      setVoiceMemoError(err instanceof Error ? err.message : "Microphone permission denied.");
+      setIsRecordingVoiceMemo(false);
+    }
+  }
+
+  function stopVoiceMemoRecording() {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
     }
   }
 
@@ -1869,6 +2236,15 @@ export default function DashboardPage() {
 
   const selectedImage =
     selectedIndex !== null ? filteredScreenshots[selectedIndex] ?? null : null;
+  const isImportedScreenshot = Boolean(selectedImage?.source_screenshot_id);
+  const effectiveVoiceMemoUrl =
+    selectedImage?.private_voice_memo_url ?? selectedImage?.voice_memo_url ?? null;
+  const effectiveVoiceMemoDuration = selectedImage?.private_voice_memo_duration_ms
+    ?? selectedImage?.voice_memo_duration_ms
+    ?? null;
+  const hasPrivateMemo = Boolean(selectedImage?.private_voice_memo_url);
+  const canRecordSourceMemo = Boolean(selectedImage && !isImportedScreenshot);
+  const canRecordPrivateMemo = Boolean(selectedImage && isImportedScreenshot);
   const panelWidth = isPanelOpen ? 380 : 48;
   const annotationToolbarWidth = isAnnotationToolbarOpen ? 68 : 44;
   const profileInitials = (email ?? "?")
@@ -2021,6 +2397,161 @@ export default function DashboardPage() {
       return { ...shape, x: shape.x + dx, y: shape.y + dy };
     }
     return { ...shape, x: shape.x + dx, y: shape.y + dy };
+  }
+
+  function getShapeBounds(shape: AnnotationShape): {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  } {
+    if (shape.kind === "path") {
+      const xs = shape.points.map((p) => p.x);
+      const ys = shape.points.map((p) => p.y);
+      return {
+        minX: Math.min(...xs),
+        minY: Math.min(...ys),
+        maxX: Math.max(...xs),
+        maxY: Math.max(...ys),
+      };
+    }
+    if (shape.kind === "arrow" || shape.kind === "line") {
+      return {
+        minX: Math.min(shape.fromX, shape.toX),
+        minY: Math.min(shape.fromY, shape.toY),
+        maxX: Math.max(shape.fromX, shape.toX),
+        maxY: Math.max(shape.fromY, shape.toY),
+      };
+    }
+    if (shape.kind === "text") {
+      const fontSize = Math.max(14, 12 + shape.size * 2);
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      let textWidth = fontSize;
+      if (ctx) {
+        ctx.font = `${fontSize}px sans-serif`;
+        textWidth = Math.max(fontSize, ctx.measureText(shape.text).width);
+      }
+      return {
+        minX: shape.x,
+        minY: shape.y,
+        maxX: shape.x + textWidth,
+        maxY: shape.y + fontSize,
+      };
+    }
+    return {
+      minX: Math.min(shape.x, shape.x + shape.width),
+      minY: Math.min(shape.y, shape.y + shape.height),
+      maxX: Math.max(shape.x, shape.x + shape.width),
+      maxY: Math.max(shape.y, shape.y + shape.height),
+    };
+  }
+
+  function getResizeHandleAtPoint(
+    shape: AnnotationShape,
+    x: number,
+    y: number
+  ): number | null {
+    const bounds = getShapeBounds(shape);
+    const corners: Array<{ x: number; y: number }> = [
+      { x: bounds.minX, y: bounds.minY },
+      { x: bounds.maxX, y: bounds.minY },
+      { x: bounds.minX, y: bounds.maxY },
+      { x: bounds.maxX, y: bounds.maxY },
+    ];
+    const threshold = 8;
+    for (let i = 0; i < corners.length; i++) {
+      const c = corners[i];
+      if (Math.hypot(x - c.x, y - c.y) <= threshold) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  function resizeCursorFromHandle(handleIndex: number | null): string {
+    if (handleIndex === 0 || handleIndex === 3) return "cursor-nwse-resize";
+    if (handleIndex === 1 || handleIndex === 2) return "cursor-nesw-resize";
+    return "cursor-default";
+  }
+
+  function resizeShapeFromHandle(
+    shape: AnnotationShape,
+    handleIndex: number,
+    pointerX: number,
+    pointerY: number
+  ): AnnotationShape {
+    const { minX, minY, maxX, maxY } = getShapeBounds(shape);
+    const oldWidth = Math.max(1, maxX - minX);
+    const oldHeight = Math.max(1, maxY - minY);
+
+    const corners: Array<{ x: number; y: number }> = [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: minX, y: maxY },
+      { x: maxX, y: maxY },
+    ];
+    const oppositeIndex = handleIndex === 0 ? 3 : handleIndex === 1 ? 2 : handleIndex === 2 ? 1 : 0;
+    const anchor = corners[oppositeIndex];
+    const nextMinX = Math.min(anchor.x, pointerX);
+    const nextMinY = Math.min(anchor.y, pointerY);
+    const nextMaxX = Math.max(anchor.x, pointerX);
+    const nextMaxY = Math.max(anchor.y, pointerY);
+    const nextWidth = Math.max(1, nextMaxX - nextMinX);
+    const nextHeight = Math.max(1, nextMaxY - nextMinY);
+    const sx = nextWidth / oldWidth;
+    const sy = nextHeight / oldHeight;
+
+    const scalePoint = (px: number, py: number) => ({
+      x: nextMinX + (px - minX) * sx,
+      y: nextMinY + (py - minY) * sy,
+    });
+
+    if (shape.kind === "path") {
+      return {
+        ...shape,
+        points: shape.points.map((p) => scalePoint(p.x, p.y)),
+      };
+    }
+    if (shape.kind === "line") {
+      const from = scalePoint(shape.fromX, shape.fromY);
+      const to = scalePoint(shape.toX, shape.toY);
+      return {
+        ...shape,
+        fromX: from.x,
+        fromY: from.y,
+        toX: to.x,
+        toY: to.y,
+      };
+    }
+    if (shape.kind === "arrow") {
+      const from = scalePoint(shape.fromX, shape.fromY);
+      const to = scalePoint(shape.toX, shape.toY);
+      return {
+        ...shape,
+        fromX: from.x,
+        fromY: from.y,
+        toX: to.x,
+        toY: to.y,
+      };
+    }
+    if (shape.kind === "text") {
+      const p = scalePoint(shape.x, shape.y);
+      const sizeScale = Math.max(0.4, Math.min(4, (sx + sy) / 2));
+      return {
+        ...shape,
+        x: p.x,
+        y: p.y,
+        size: Math.max(1, Math.round(shape.size * sizeScale)),
+      };
+    }
+    return {
+      ...shape,
+      x: nextMinX,
+      y: nextMinY,
+      width: nextWidth,
+      height: nextHeight,
+    };
   }
 
   function drawArrowShape(
@@ -2982,7 +3513,9 @@ export default function DashboardPage() {
     setAnnotationHistoryIndex(0);
     setSelectedAnnotationId(null);
     setHoveredAnnotationId(null);
+    setHoveredResizeHandleIndex(null);
     setIsDraggingAnnotation(false);
+    setIsResizingAnnotation(false);
     setTextDraft(null);
     lastAnnotationFingerprintRef.current = `${selectedImage.id}:${JSON.stringify(
       shapes
@@ -3073,6 +3606,12 @@ export default function DashboardPage() {
   }, [selectedImage?.id, selectedAnnotationId]);
 
   useEffect(() => {
+    if (!selectedAnnotationId) {
+      setHoveredResizeHandleIndex(null);
+    }
+  }, [selectedAnnotationId]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const canvasEl = canvas;
@@ -3100,9 +3639,25 @@ export default function DashboardPage() {
       }
 
       if (tool === "select") {
+        if (selectedAnnotationId) {
+          const selectedShape = annotationShapes.find((s) => s.id === selectedAnnotationId);
+          if (selectedShape) {
+            const resizeHandle = getResizeHandleAtPoint(selectedShape, x, y);
+            if (resizeHandle !== null) {
+              dragStartShapeRef.current = JSON.parse(JSON.stringify(selectedShape));
+              resizeHandleIndexRef.current = resizeHandle;
+              isResizingAnnotationRef.current = true;
+              setIsResizingAnnotation(true);
+              setHoveredResizeHandleIndex(resizeHandle);
+              isDrawingRef.current = false;
+              return;
+            }
+          }
+        }
         const hitId = findShapeAtPoint(x, y);
         setSelectedAnnotationId(hitId);
         setHoveredAnnotationId(hitId);
+        setHoveredResizeHandleIndex(null);
         if (hitId) {
           const selected = annotationShapes.find((s) => s.id === hitId) ?? null;
           if (selected) {
@@ -3135,6 +3690,24 @@ export default function DashboardPage() {
 
     function handleMouseMove(e: MouseEvent) {
       const { x, y } = getPoint(e);
+      if (
+        tool === "select" &&
+        isResizingAnnotationRef.current &&
+        selectedAnnotationId &&
+        resizeHandleIndexRef.current !== null
+      ) {
+        const seed = dragStartShapeRef.current;
+        if (!seed) return;
+        const handleIndex = resizeHandleIndexRef.current;
+        setAnnotationShapes((prev) =>
+          prev.map((shape) =>
+            shape.id === selectedAnnotationId
+              ? resizeShapeFromHandle(seed, handleIndex, x, y)
+              : shape
+          )
+        );
+        return;
+      }
       if (tool === "select" && isDraggingAnnotationRef.current && selectedAnnotationId) {
         const seed = dragStartShapeRef.current;
         if (!seed) return;
@@ -3150,6 +3723,17 @@ export default function DashboardPage() {
       if (tool === "select") {
         const hitId = findShapeAtPoint(x, y);
         setHoveredAnnotationId((prev) => (prev === hitId ? prev : hitId));
+        if (selectedAnnotationId) {
+          const selectedShape = annotationShapes.find((s) => s.id === selectedAnnotationId);
+          if (selectedShape) {
+            const handle = getResizeHandleAtPoint(selectedShape, x, y);
+            setHoveredResizeHandleIndex((prev) => (prev === handle ? prev : handle));
+          } else {
+            setHoveredResizeHandleIndex(null);
+          }
+        } else {
+          setHoveredResizeHandleIndex(null);
+        }
         return;
       }
 
@@ -3229,6 +3813,14 @@ export default function DashboardPage() {
     }
 
     function handleMouseUp(e: MouseEvent) {
+      if (tool === "select" && isResizingAnnotationRef.current) {
+        isResizingAnnotationRef.current = false;
+        setIsResizingAnnotation(false);
+        resizeHandleIndexRef.current = null;
+        dragStartShapeRef.current = null;
+        pushShapesHistory(annotationShapes);
+        return;
+      }
       if (tool === "select" && isDraggingAnnotationRef.current) {
         isDraggingAnnotationRef.current = false;
         setIsDraggingAnnotation(false);
@@ -3344,6 +3936,7 @@ export default function DashboardPage() {
     strokeSize,
     highlightOpacity,
     selectedAnnotationId,
+    hoveredResizeHandleIndex,
     annotationShapes,
     annotationHistory,
     annotationHistoryIndex,
@@ -3397,6 +3990,15 @@ export default function DashboardPage() {
       }
       if (attributeSaveTimeoutRef.current) {
         window.clearTimeout(attributeSaveTimeoutRef.current);
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (audioPlaybackRef.current) {
+        audioPlaybackRef.current.pause();
       }
     };
   }, []);
@@ -4070,12 +4672,12 @@ export default function DashboardPage() {
 
                         setSelectedIndex(index);
                       }}
-                      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border shadow-sm transition-all duration-150 ease-in-out hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-md hover:bg-gray-100 ${
+                      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border shadow-sm transition-all duration-150 ease-in-out hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-md ${
                         highlightNew
-                          ? "border-blue-400/75 bg-gradient-to-b from-blue-50/90 to-white shadow-[0_0_0_1px_rgba(59,130,246,0.12)] animate-card-highlight-new"
+                          ? "border-blue-400/75 bg-gradient-to-b from-blue-500/15 to-transparent shadow-[0_0_0_1px_rgba(59,130,246,0.12)] animate-card-highlight-new"
                           : highlightUpdated
-                            ? "border-amber-400/75 bg-gradient-to-b from-amber-50/90 to-white shadow-[0_0_0_1px_rgba(245,158,11,0.12)] animate-card-highlight-updated"
-                            : "border-gray-200 bg-white"
+                            ? "border-amber-400/75 bg-gradient-to-b from-amber-500/15 to-transparent shadow-[0_0_0_1px_rgba(245,158,11,0.12)] animate-card-highlight-updated"
+                            : "border-default bg-surface hover:bg-surface-muted"
                       } cursor-pointer ${
                         selectedIds.includes(shot.id)
                           ? "ring-2 ring-gray-900 scale-[0.98]"
@@ -4083,7 +4685,7 @@ export default function DashboardPage() {
                       }`}
                     >
                       {selectedIds.includes(shot.id) && (
-                        <div className="absolute top-2 left-2 rounded bg-white p-1 shadow">
+                        <div className="absolute top-2 left-2 rounded bg-surface p-1 shadow">
                           <Check className="w-4 h-4 text-green-600" aria-hidden />
                         </div>
                       )}
@@ -4132,7 +4734,7 @@ export default function DashboardPage() {
                             {shot.tags?.map((tag, i) => (
                               <span
                                 key={`${shot.id}-${tag}-${i}`}
-                                className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
+                                className="rounded-full bg-surface-muted px-2 py-1 text-xs text-foreground"
                               >
                                 {tag}
                               </span>
@@ -4515,9 +5117,13 @@ export default function DashboardPage() {
                       ref={canvasRef}
                       className={`absolute inset-0 h-full w-full ${
                         tool === "select"
-                          ? isDraggingAnnotation
+                          ? isResizingAnnotation
+                            ? resizeCursorFromHandle(hoveredResizeHandleIndex)
+                            : isDraggingAnnotation
                             ? "cursor-grabbing"
-                            : hoveredAnnotationId
+                            : hoveredResizeHandleIndex !== null
+                              ? resizeCursorFromHandle(hoveredResizeHandleIndex)
+                              : hoveredAnnotationId
                               ? "cursor-grab"
                               : "cursor-default"
                           : "cursor-crosshair"
@@ -4982,6 +5588,175 @@ export default function DashboardPage() {
                       {savingNote && (
                         <div className="mt-2 text-xs text-gray-500">Saving note...</div>
                       )}
+
+                      <div className="mt-5 border-t border-gray-200 pt-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Voice Memo
+                          </p>
+                          {(hasPrivateMemo || selectedImage?.voice_memo_url) && (
+                            <span className="text-[11px] text-gray-500">
+                              {hasPrivateMemo ? "Private memo" : "Source memo"}
+                              {formatVoiceMemoDuration(effectiveVoiceMemoDuration)
+                                ? ` • ${formatVoiceMemoDuration(effectiveVoiceMemoDuration)}`
+                                : ""}
+                            </span>
+                          )}
+                        </div>
+
+                        {effectiveVoiceMemoUrl && (
+                          <audio
+                            ref={audioPlaybackRef}
+                            src={effectiveVoiceMemoUrl}
+                            className="mt-2 w-full"
+                            controls
+                            onPlay={() => setIsPlayingVoiceMemo(true)}
+                            onPause={() => setIsPlayingVoiceMemo(false)}
+                            onEnded={() => setIsPlayingVoiceMemo(false)}
+                          />
+                        )}
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {canRecordSourceMemo && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isRecordingVoiceMemo
+                                  ? stopVoiceMemoRecording()
+                                  : void startVoiceMemoRecording("source")
+                              }
+                              disabled={savingVoiceMemo}
+                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                            >
+                              {isRecordingVoiceMemo ? (
+                                <>
+                                  <StopIcon className="h-3.5 w-3.5" aria-hidden />
+                                  Stop
+                                </>
+                              ) : (
+                                <>
+                                  <Mic className="h-3.5 w-3.5" aria-hidden />
+                                  Record
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {canRecordPrivateMemo && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isRecordingVoiceMemo
+                                  ? stopVoiceMemoRecording()
+                                  : void startVoiceMemoRecording("private")
+                              }
+                              disabled={savingVoiceMemo}
+                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                            >
+                              {isRecordingVoiceMemo ? (
+                                <>
+                                  <StopIcon className="h-3.5 w-3.5" aria-hidden />
+                                  Stop private
+                                </>
+                              ) : (
+                                <>
+                                  <Mic className="h-3.5 w-3.5" aria-hidden />
+                                  {hasPrivateMemo ? "Replace private" : "Record private"}
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {effectiveVoiceMemoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const audio = audioPlaybackRef.current;
+                                if (!audio) return;
+                                if (isPlayingVoiceMemo) {
+                                  audio.pause();
+                                } else {
+                                  void audio.play();
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+                            >
+                              {isPlayingVoiceMemo ? (
+                                <>
+                                  <Pause className="h-3.5 w-3.5" aria-hidden />
+                                  Pause
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-3.5 w-3.5" aria-hidden />
+                                  Play
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {(canRecordSourceMemo && selectedImage?.voice_memo_url) && (
+                            <button
+                              type="button"
+                              disabled={savingVoiceMemo}
+                              onClick={() => {
+                                if (!selectedImage) return;
+                                setSavingVoiceMemo(true);
+                                void deleteVoiceMemo(selectedImage, "source")
+                                  .catch((err: unknown) =>
+                                    setVoiceMemoError(
+                                      err instanceof Error
+                                        ? err.message
+                                        : "Failed to delete voice memo."
+                                    )
+                                  )
+                                  .finally(() => setSavingVoiceMemo(false));
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                              Delete source
+                            </button>
+                          )}
+
+                          {(canRecordPrivateMemo && selectedImage?.private_voice_memo_url) && (
+                            <button
+                              type="button"
+                              disabled={savingVoiceMemo}
+                              onClick={() => {
+                                if (!selectedImage) return;
+                                setSavingVoiceMemo(true);
+                                void deleteVoiceMemo(selectedImage, "private")
+                                  .catch((err: unknown) =>
+                                    setVoiceMemoError(
+                                      err instanceof Error
+                                        ? err.message
+                                        : "Failed to delete private memo."
+                                    )
+                                  )
+                                  .finally(() => setSavingVoiceMemo(false));
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                              Delete private
+                            </button>
+                          )}
+                        </div>
+
+                        {isImportedScreenshot && selectedImage?.voice_memo_url && (
+                          <p className="mt-2 text-xs text-gray-500">
+                            Source memo is play-only. You can keep a private memo for your imported
+                            copy.
+                          </p>
+                        )}
+                        {savingVoiceMemo && (
+                          <p className="mt-2 text-xs text-gray-500">Saving voice memo...</p>
+                        )}
+                        {voiceMemoError && (
+                          <p className="mt-2 text-xs text-red-600">{voiceMemoError}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
