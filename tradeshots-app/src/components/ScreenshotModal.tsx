@@ -401,7 +401,7 @@ export default function ScreenshotModal({
                     ? ` (${formatVoiceDuration(effectiveDuration)})`
                     : ""}
                 </div>
-                <audio controls src={effectiveVoiceMemoUrl} className="w-full" />
+                <audio controls src={effectiveVoiceMemoUrl} className="voice-memo-audio w-full" />
                 {readOnly && screenshot.source_screenshot_id && (
                   <p className="mt-1 text-xs text-gray-500">
                     Playback only in shared/imported view.

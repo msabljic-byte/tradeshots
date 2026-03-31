@@ -337,3 +337,22 @@ body {
     animation: none;
   }
 }
+
+/* Theme-aware native audio controls for voice memos (WebKit/Chromium). */
+.voice-memo-audio {
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+:root[data-theme="dark"] .voice-memo-audio {
+  background-color: var(--surface-muted);
+  color-scheme: dark;
+}
+
+:root[data-theme="dark"] .voice-memo-audio::-webkit-media-controls-panel {
+  background-color: var(--surface-muted);
+}
+
+:root[data-theme="dark"] .voice-memo-audio::-webkit-media-controls-enclosure {
+  background-color: var(--surface-muted);
+}

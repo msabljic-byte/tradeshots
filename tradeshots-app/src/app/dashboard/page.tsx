@@ -275,6 +275,10 @@ function formatVoiceMemoDuration(durationMs: number | null | undefined): string 
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+type HTMLAudioWithSinkId = HTMLAudioElement & {
+  setSinkId?: (deviceId: string) => Promise<void>;
+};
+
 function buildAttributeMapFromRows(
   rows: Record<string, unknown>[]
 ): Record<string, Record<string, string[]>> {
@@ -383,6 +387,11 @@ export default function DashboardPage() {
   const [savingVoiceMemo, setSavingVoiceMemo] = useState(false);
   const [isRecordingVoiceMemo, setIsRecordingVoiceMemo] = useState(false);
   const [isPlayingVoiceMemo, setIsPlayingVoiceMemo] = useState(false);
+  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
+  const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<string>("");
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<string>("");
   const [attributes, setAttributes] = useState<any[]>([]);
   const [undoData, setUndoData] = useState<{
     attribute: any;
@@ -441,6 +450,8 @@ export default function DashboardPage() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<BlobPart[]>([]);
   const audioPlaybackRef = useRef<HTMLAudioElement | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingTickRef = useRef<number | null>(null);
   const lastAnnotationFingerprintRef = useRef("");
   const lastNoteByScreenshotRef = useRef<Record<string, string>>({});
   const lastAttributesByScreenshotRef = useRef<Record<string, string>>({});
@@ -1577,6 +1588,22 @@ export default function DashboardPage() {
   }, [selectedIndex]);
 
   useEffect(() => {
+    void refreshAudioDevices();
+    if (!navigator.mediaDevices?.addEventListener) return;
+    const onDeviceChange = () => {
+      void refreshAudioDevices();
+    };
+    navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    void applySelectedOutputDevice(audioPlaybackRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOutputDeviceId, selectedIndex]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function fetchAttributes() {
@@ -1706,6 +1733,38 @@ export default function DashboardPage() {
         resolve(null);
       };
     });
+  }
+
+  async function refreshAudioDevices(): Promise<void> {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === "audioinput");
+      const outputs = devices.filter((d) => d.kind === "audiooutput");
+      setInputDevices(inputs);
+      setOutputDevices(outputs);
+
+      if (inputs.length > 0 && !inputs.some((d) => d.deviceId === selectedInputDeviceId)) {
+        setSelectedInputDeviceId(inputs[0].deviceId);
+      }
+      if (outputs.length > 0 && !outputs.some((d) => d.deviceId === selectedOutputDeviceId)) {
+        setSelectedOutputDeviceId(outputs[0].deviceId);
+      }
+    } catch (err) {
+      console.warn("enumerateDevices:", err);
+    }
+  }
+
+  async function applySelectedOutputDevice(audio: HTMLAudioElement | null): Promise<void> {
+    if (!audio || !selectedOutputDeviceId) return;
+    const withSink = audio as HTMLAudioWithSinkId;
+    if (typeof withSink.setSinkId !== "function") return;
+    try {
+      await withSink.setSinkId(selectedOutputDeviceId);
+    } catch (err) {
+      console.warn("setSinkId:", err);
+      setVoiceMemoError("This browser blocked changing playback output.");
+    }
   }
 
   async function uploadVoiceMemoBlob(
@@ -1917,7 +1976,11 @@ export default function DashboardPage() {
     }
     setVoiceMemoError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: selectedInputDeviceId
+          ? { deviceId: { exact: selectedInputDeviceId } }
+          : true,
+      });
       const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
@@ -1931,6 +1994,12 @@ export default function DashboardPage() {
         });
         recordingChunksRef.current = [];
         setIsRecordingVoiceMemo(false);
+        if (recordingTickRef.current) {
+          window.clearInterval(recordingTickRef.current);
+          recordingTickRef.current = null;
+        }
+        recordingStartedAtRef.current = null;
+        setRecordingElapsedMs(0);
         if (blob.size > 0) {
           setSavingVoiceMemo(true);
           void uploadVoiceMemoBlob(selectedImage, blob, mode)
@@ -1946,6 +2015,16 @@ export default function DashboardPage() {
       };
       recorder.start();
       setIsRecordingVoiceMemo(true);
+      recordingStartedAtRef.current = Date.now();
+      setRecordingElapsedMs(0);
+      if (recordingTickRef.current) {
+        window.clearInterval(recordingTickRef.current);
+      }
+      recordingTickRef.current = window.setInterval(() => {
+        if (!recordingStartedAtRef.current) return;
+        setRecordingElapsedMs(Date.now() - recordingStartedAtRef.current);
+      }, 200);
+      void refreshAudioDevices();
     } catch (err) {
       setVoiceMemoError(err instanceof Error ? err.message : "Microphone permission denied.");
       setIsRecordingVoiceMemo(false);
@@ -4000,6 +4079,9 @@ export default function DashboardPage() {
       if (audioPlaybackRef.current) {
         audioPlaybackRef.current.pause();
       }
+      if (recordingTickRef.current) {
+        window.clearInterval(recordingTickRef.current);
+      }
     };
   }, []);
 
@@ -5603,18 +5685,61 @@ export default function DashboardPage() {
                             </span>
                           )}
                         </div>
+                        {isRecordingVoiceMemo && (
+                          <p className="mt-1 text-[11px] text-red-500">
+                            Recording... {formatVoiceMemoDuration(recordingElapsedMs) ?? "0:00"}
+                          </p>
+                        )}
 
                         {effectiveVoiceMemoUrl && (
                           <audio
                             ref={audioPlaybackRef}
                             src={effectiveVoiceMemoUrl}
-                            className="mt-2 w-full"
+                            className="voice-memo-audio mt-2 w-full"
                             controls
                             onPlay={() => setIsPlayingVoiceMemo(true)}
                             onPause={() => setIsPlayingVoiceMemo(false)}
                             onEnded={() => setIsPlayingVoiceMemo(false)}
                           />
                         )}
+
+                        <div className="mt-2 grid grid-cols-1 gap-2">
+                          <label className="text-[11px] text-gray-500">
+                            Recording source
+                            <select
+                              value={selectedInputDeviceId}
+                              onChange={(e) => setSelectedInputDeviceId(e.target.value)}
+                              className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800"
+                            >
+                              {inputDevices.length === 0 && (
+                                <option value="">Default microphone</option>
+                              )}
+                              {inputDevices.map((device, idx) => (
+                                <option key={device.deviceId || `in-${idx}`} value={device.deviceId}>
+                                  {device.label || `Microphone ${idx + 1}`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <label className="text-[11px] text-gray-500">
+                            Playback output
+                            <select
+                              value={selectedOutputDeviceId}
+                              onChange={(e) => setSelectedOutputDeviceId(e.target.value)}
+                              className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800"
+                            >
+                              {outputDevices.length === 0 && (
+                                <option value="">Default output</option>
+                              )}
+                              {outputDevices.map((device, idx) => (
+                                <option key={device.deviceId || `out-${idx}`} value={device.deviceId}>
+                                  {device.label || `Output ${idx + 1}`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
 
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           {canRecordSourceMemo && (
@@ -5676,6 +5801,7 @@ export default function DashboardPage() {
                                 if (isPlayingVoiceMemo) {
                                   audio.pause();
                                 } else {
+                                  void applySelectedOutputDevice(audio);
                                   void audio.play();
                                 }
                               }}
