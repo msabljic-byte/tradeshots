@@ -18,6 +18,13 @@ import {
   markScreenshotUpdated,
   markScreenshotsUpdated,
 } from "@/lib/markScreenshotUpdated";
+import {
+  applyTheme,
+  getStoredTheme,
+  setStoredTheme,
+  toggleTheme,
+  type ThemeMode,
+} from "@/lib/theme";
 import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
 import { createPortal } from "react-dom";
 import {
@@ -33,10 +40,12 @@ import {
   Lock,
   Link as LinkIcon,
   Image as ImageIcon,
+  Moon,
   Pencil,
   Plus,
   RefreshCw,
   Search,
+  Sun,
   Sparkles,
   Trash2,
   Upload,
@@ -252,6 +261,7 @@ export default function DashboardPage() {
   const [email, setEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>("light");
   const [loading, setLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [allScreenshots, setAllScreenshots] = useState<any[]>([]);
@@ -297,6 +307,11 @@ export default function DashboardPage() {
   const [editingDescription, setEditingDescription] = useState(false);
   const [description, setDescription] = useState("");
   const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareModalFolder, setShareModalFolder] = useState<any | null>(null);
+  const [isPaid, setIsPaid] = useState(false);
+  const [price, setPrice] = useState(0);
+  const [shareSaving, setShareSaving] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const skipSidebarPersistRef = useRef(true);
@@ -383,6 +398,26 @@ export default function DashboardPage() {
       toastExitTimeoutRef.current = null;
       setToastExiting(false);
     }, TOAST_TOTAL_MS);
+  }
+
+  useEffect(() => {
+    const stored = getStoredTheme();
+    if (stored) {
+      setThemeMode(stored);
+      applyTheme(stored);
+      return;
+    }
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initial: ThemeMode = prefersDark ? "dark" : "light";
+    setThemeMode(initial);
+    applyTheme(initial);
+  }, []);
+
+  function handleToggleTheme() {
+    const next = toggleTheme(themeMode);
+    setThemeMode(next);
+    applyTheme(next);
+    setStoredTheme(next);
   }
 
   async function loadNotifications() {
@@ -767,14 +802,34 @@ export default function DashboardPage() {
     return Math.random().toString(36).substring(2, 10);
   }
 
-  async function makePublic(folder: any): Promise<boolean> {
+  function openShareModal(folder: any) {
+    setShareModalFolder(folder);
+    setIsPaid(Boolean(folder?.is_paid));
+    setPrice(Number(folder?.price ?? 0));
+    setShareModalOpen(true);
+  }
+
+  function closeShareModal() {
+    setShareModalOpen(false);
+    setShareModalFolder(null);
+    setShareSaving(false);
+  }
+
+  async function makePublic(folder: any, nextIsPaid: boolean, nextPrice: number): Promise<boolean> {
+    const finalPrice = nextIsPaid ? nextPrice : 0;
     let shareId = String(folder?.share_id ?? "");
 
+    // Preserve existing share_id (keep it stable). Only generate if missing.
     if (!shareId) {
       shareId = generateShareId();
       const { error: shareError } = await supabase
         .from("folders")
-        .update({ share_id: shareId })
+        .update({
+          share_id: shareId,
+          is_public: true,
+          is_paid: nextIsPaid,
+          price: finalPrice,
+        })
         .eq("id", folder.id);
 
       if (shareError) {
@@ -790,13 +845,33 @@ export default function DashboardPage() {
       return true;
     }
 
+    const { error: shareError } = await supabase
+      .from("folders")
+      .update({
+        is_public: true,
+        is_paid: nextIsPaid,
+        price: finalPrice,
+      })
+      .eq("id", folder.id);
+
+    if (shareError) {
+      setError(shareError.message);
+      return false;
+    }
+
+    await fetchFolders();
     return true;
   }
 
   async function makePrivate(folder: any): Promise<boolean> {
     const { error } = await supabase
       .from("folders")
-      .update({ share_id: null })
+      .update({
+        share_id: null,
+        is_public: false,
+        is_paid: false,
+        price: 0,
+      })
       .eq("id", folder.id);
 
     if (error) {
@@ -810,6 +885,24 @@ export default function DashboardPage() {
 
     await fetchFolders();
     return true;
+  }
+
+  async function saveShareSettings() {
+    if (!shareModalFolder) return;
+
+    if (isPaid && (!Number.isFinite(price) || price <= 0)) {
+      showToast("Price must be greater than 0.");
+      return;
+    }
+
+    setShareSaving(true);
+    try {
+      const ok = await makePublic(shareModalFolder, isPaid, price);
+      if (ok) showToast("Playbook is now public.");
+      closeShareModal();
+    } catch {
+      setShareSaving(false);
+    }
   }
 
   async function handleSaveView() {
@@ -2605,14 +2698,25 @@ export default function DashboardPage() {
                     >
                       <Lock className="w-4 h-4" aria-hidden />
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openShareModal(folder);
+                      }}
+                      className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                      title="Edit pricing"
+                    >
+                      <CreditCard className="w-4 h-4" aria-hidden />
+                    </button>
                   </>
                 ) : (
                   <button
                     type="button"
-                    onClick={async (e) => {
+                      onClick={(e) => {
                       e.stopPropagation();
-                      const ok = await makePublic(folder);
-                      if (ok) showToast("Playbook is now public");
+                        openShareModal(folder);
                     }}
                     className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
                     title="Make public"
@@ -3162,7 +3266,7 @@ export default function DashboardPage() {
   }, [sidebarWidth]);
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-background">
       <div
         style={{ width: sidebarWidth }}
         className="relative box-border flex min-w-0 shrink-0 flex-col border-r border-gray-200 bg-white p-4"
@@ -3248,7 +3352,7 @@ export default function DashboardPage() {
                       setEditingDescription(true);
                     }
                   }}
-                  className="cursor-pointer rounded-md p-1 text-sm text-gray-500 hover:bg-gray-50"
+                  className="cursor-pointer rounded-md p-1 text-sm text-gray-500 hover:bg-surface-muted"
                 >
                   {description || "Add description..."}
                 </p>
@@ -3284,7 +3388,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
+        <div className="flex items-center justify-between border-b border-default bg-surface px-6 py-3">
           <div className="w-full max-w-md">
             <button
               type="button"
@@ -3317,7 +3421,7 @@ export default function DashboardPage() {
               </button>
 
               {notificationsOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
+                <div className="absolute right-0 z-50 mt-2 w-72 rounded-lg border border-default bg-surface shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
                   <div className="border-b border-gray-100 p-3 text-sm font-medium text-gray-900">
                     Notifications
                   </div>
@@ -3413,7 +3517,7 @@ export default function DashboardPage() {
               </button>
 
               {isProfileOpen && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-56 origin-top-right rounded-xl border border-gray-200 bg-white p-2 shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
+                <div className="absolute right-0 top-full z-50 mt-2 w-56 origin-top-right rounded-xl border border-default bg-surface p-2 shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
                   <div className="px-2 py-1">
                     <p className="text-[11px] uppercase tracking-wide text-gray-500">
                       Signed in as
@@ -3428,6 +3532,62 @@ export default function DashboardPage() {
                   >
                     Account settings
                   </button>
+                  <div className="mx-2 mb-1 mt-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {themeMode === "dark" ? "Dark mode" : "Light mode"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {themeMode === "dark" ? "Switch to light" : "Switch to dark"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={themeMode === "dark"}
+                        onClick={handleToggleTheme}
+                        aria-label={
+                          themeMode === "dark"
+                            ? "Switch to light mode"
+                            : "Switch to dark mode"
+                        }
+                        className={`relative inline-flex h-9 w-16 shrink-0 items-center overflow-hidden rounded-full border p-1 transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                          themeMode === "dark"
+                            ? "border-[#0f1b3d] bg-[#050f2b]"
+                            : "border-gray-300 bg-gray-200"
+                        }`}
+                      >
+                        <span
+                          className={`absolute left-2 transition-opacity duration-150 ${
+                            themeMode === "dark" ? "opacity-50" : "opacity-90"
+                          }`}
+                          aria-hidden
+                        >
+                          <Sun className="h-4 w-4 text-gray-400" />
+                        </span>
+                        <span
+                          className={`absolute right-2 transition-opacity duration-150 ${
+                            themeMode === "dark" ? "opacity-95" : "opacity-60"
+                          }`}
+                          aria-hidden
+                        >
+                          <Moon
+                            className={`h-4 w-4 ${
+                              themeMode === "dark" ? "text-gray-100" : "text-gray-500"
+                            }`}
+                          />
+                        </span>
+                        <span
+                          className={`absolute left-1 top-1 inline-block h-7 w-7 transform rounded-full shadow-md transition-transform duration-200 ease-out ${
+                            themeMode === "dark"
+                              ? "translate-x-7 bg-[#2f3c6b]"
+                              : "translate-x-0 bg-white"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
                   <button
                     type="button"
                     onClick={handleLogout}
@@ -3957,6 +4117,87 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {shareModalOpen && shareModalFolder && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40"
+          onClick={() => closeShareModal()}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-4 text-sm font-semibold text-gray-900">
+              {shareModalFolder?.share_id ? "Edit pricing" : "Share playbook"}
+            </p>
+
+            <div className="space-y-3">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="radio"
+                  name="shareType"
+                  checked={!isPaid}
+                  onChange={() => setIsPaid(false)}
+                  className="h-4 w-4 cursor-pointer"
+                />
+                <span className="text-sm text-gray-700">Free</span>
+              </label>
+
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="radio"
+                  name="shareType"
+                  checked={isPaid}
+                  onChange={() => setIsPaid(true)}
+                  className="h-4 w-4 cursor-pointer"
+                />
+                <span className="text-sm text-gray-700">Paid</span>
+              </label>
+            </div>
+
+            {isPaid && (
+              <div className="mt-4">
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Price (EUR)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={price}
+                  onChange={(e) => setPrice(Number(e.target.value))}
+                  placeholder="Enter price (e.g. 29)"
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-gray-300"
+                />
+                {price <= 0 && (
+                  <p className="mt-1 text-xs text-red-600">
+                    Price must be greater than 0.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => closeShareModal()}
+                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+                disabled={shareSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveShareSettings()}
+                className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={shareSaving || (isPaid && price <= 0)}
+              >
+                {shareSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div
           className={`fixed bottom-6 left-1/2 z-[9999] -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg ${
@@ -4161,7 +4402,7 @@ export default function DashboardPage() {
 
               {/* RIGHT: PANEL — only this column scrolls when content is tall */}
               <div
-                className={`box-border flex h-full min-h-0 ${isPanelOpen ? "w-[380px]" : "w-[48px]"} shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-gray-50 p-4 transition-all duration-300`}
+                className={`box-border flex h-full min-h-0 ${isPanelOpen ? "w-[380px]" : "w-[48px]"} shrink-0 flex-col overflow-y-auto border-l border-default bg-surface-muted p-4 transition-all duration-300`}
               >
                 <div className="mb-4 flex items-center justify-between">
                   {isPanelOpen && (

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotModal from "@/components/ScreenshotModal";
 import { Image as ImageIcon } from "lucide-react";
+import { loadStripe } from "@stripe/stripe-js";
 
 type ScreenshotRow = {
   id: string;
@@ -20,6 +21,9 @@ type ScreenshotRow = {
 };
 
 const LOCAL_ANNOTATIONS_KEY = "tradeshots.localAnnotations.v1";
+const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
+  : null;
 
 function readLocalAnnotations(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -94,6 +98,8 @@ export default function PublicPlaybookPage() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [toastExiting, setToastExiting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
@@ -124,6 +130,54 @@ export default function PublicPlaybookPage() {
     }, 3200);
   }
 
+  function redirectToLoginForThisPlaybook() {
+    const nextPath = shareId ? `/playbook/${shareId}` : "/dashboard";
+    router.push(`/login?next=${encodeURIComponent(nextPath)}`);
+  }
+
+  async function createCheckoutSession(userId: string): Promise<string | null> {
+    if (!shareId) return null;
+
+    const res = await fetch("/api/create-checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playbookId: shareId, userId }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(data?.error ?? "Failed to start checkout.");
+      return null;
+    }
+
+    const sessionId = data?.sessionId;
+    if (!sessionId) {
+      showToast("Could not create checkout session.");
+      return null;
+    }
+
+    return String(sessionId);
+  }
+
+  async function handleBuyWithStripe(userId: string) {
+    setCheckingOut(true);
+    try {
+      const stripe = stripePromise ? await stripePromise : null;
+      if (!stripe) {
+        showToast("Stripe is not configured.");
+        return;
+      }
+
+      const sessionId = await createCheckoutSession(userId);
+      if (!sessionId) return;
+
+      const { error } = await (stripe as any).redirectToCheckout({ sessionId });
+      if (error) showToast(error.message);
+    } finally {
+      setCheckingOut(false);
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
@@ -145,7 +199,7 @@ export default function PublicPlaybookPage() {
 
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) {
-      showToast("Please log in first");
+      redirectToLoginForThisPlaybook();
       return;
     }
 
@@ -328,11 +382,69 @@ export default function PublicPlaybookPage() {
 
   useEffect(() => {
     if (!folder) return;
+    const successParam =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("success")
+        : null;
+
     if (!folder.is_paid) {
       setHasAccess(true);
-    } else {
-      setHasAccess(false);
+      return;
     }
+
+    const paidSuccess = successParam === "true";
+    setIsUnlocked(false);
+
+    if (!paidSuccess) {
+      setHasAccess(false);
+      return;
+    }
+
+    // success URL includes `session_id={CHECKOUT_SESSION_ID}`.
+    const sessionId =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("session_id")
+        : null;
+
+    if (!sessionId) {
+      setHasAccess(false);
+      showToast("Payment missing session id. Please try again.");
+      return;
+    }
+
+    async function verifyPayment() {
+      setVerifyingPayment(true);
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        if (!auth.user) {
+          redirectToLoginForThisPlaybook();
+          return;
+        }
+
+        const res = await fetch("/api/verify-checkout-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            playbookId: shareId,
+            userId: auth.user.id,
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data?.authorized) {
+          setHasAccess(true);
+          showToast("Payment confirmed. You can import now.");
+        } else {
+          setHasAccess(false);
+          showToast(data?.error ?? "Payment could not be verified.");
+        }
+      } finally {
+        setVerifyingPayment(false);
+      }
+    }
+
+    void verifyPayment();
   }, [folder]);
 
   useEffect(() => {
@@ -348,7 +460,9 @@ export default function PublicPlaybookPage() {
 
       const folderQuery = await supabase
         .from("folders")
-        .select("*")
+        .select(
+          "id, name, description, owner_email, share_id, is_paid, price"
+        )
         .eq("share_id", shareId)
         .single();
 
@@ -421,7 +535,7 @@ export default function PublicPlaybookPage() {
 
   if (!hasAccess || !isUnlocked) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-background">
         <div className="relative mx-auto max-w-4xl px-6 py-16 text-center">
           <div className="absolute right-6 top-10 text-xs text-gray-400">
             Powered by Tradeshots
@@ -455,15 +569,31 @@ export default function PublicPlaybookPage() {
           )}
 
           {folder.is_paid && !hasAccess ? (
-            <button
-              type="button"
-              onClick={() => {
-                setHasAccess(true);
-              }}
-              className="mt-10 rounded-lg bg-green-600 px-6 py-2 text-white transition hover:bg-green-700"
-            >
-              Buy for €{folder.price ?? 19}
-            </button>
+            <div className="mt-10 flex flex-col items-center gap-3 text-center">
+              <div className="text-sm text-gray-600">Price</div>
+              <div className="text-3xl font-bold text-gray-900">
+                €{folder.price ?? 19}
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  const { data: auth } = await supabase.auth.getUser();
+                  if (!auth.user) {
+                    redirectToLoginForThisPlaybook();
+                    return;
+                  }
+                  await handleBuyWithStripe(auth.user.id);
+                }}
+                disabled={checkingOut || verifyingPayment}
+                className="btn btn-primary mt-2 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {verifyingPayment
+                  ? "Verifying payment…"
+                  : checkingOut
+                    ? "Redirecting…"
+                    : "Buy & Import"}
+              </button>
+            </div>
           ) : (
             <div className="mt-10 flex flex-col items-center gap-3">
               <button
@@ -499,7 +629,7 @@ export default function PublicPlaybookPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="relative">
           <div className="absolute right-0 top-0 text-xs text-gray-400">

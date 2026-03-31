@@ -35,7 +35,7 @@ export default function SignupPage() {
   }, [router]);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6 font-sans">
+    <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="flex w-full max-w-md flex-col items-center gap-4">
         <AuthForm mode="signup" />
 

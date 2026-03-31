@@ -1,14 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Globe } from "lucide-react";
 import AuthForm from "@/components/auth/AuthForm";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath =
+    searchParams.get("next") && searchParams.get("next")!.startsWith("/")
+      ? searchParams.get("next")!
+      : "/dashboard";
   const [oauthLoading, setOauthLoading] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
@@ -20,14 +25,14 @@ export default function LoginPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (session && isMounted) router.replace("/dashboard");
+      if (session && isMounted) router.replace(nextPath);
     }
 
     redirectIfLoggedIn();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        if (session) router.replace("/dashboard");
+        if (session) router.replace(nextPath);
       }
     );
 
@@ -35,13 +40,17 @@ export default function LoginPage() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, nextPath]);
 
   async function handleGoogleLogin() {
     setOauthError(null);
     setOauthLoading(true);
     try {
-      const redirectTo = `${window.location.origin}/dashboard`;
+      // Ensure OAuth callback returns to this login page so we can redirect
+      // users back to the original playbook (`next` query param).
+      const redirectTo = `${window.location.origin}/login?next=${encodeURIComponent(
+        nextPath
+      )}`;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
@@ -55,7 +64,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6 font-sans">
+    <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="flex w-full max-w-md flex-col items-center gap-4">
         <button
           type="button"
@@ -88,6 +97,14 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   );
 }
 

@@ -212,7 +212,7 @@ export default function ScreenshotUploader({
   }
 
   return (
-    <div className="w-full rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+    <div className="w-full rounded-2xl border border-default bg-surface p-6 shadow-sm">
       <div className="mb-4">
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus-within:ring-2 focus-within:ring-gray-300 transition">
           {tags.map((tag) => (

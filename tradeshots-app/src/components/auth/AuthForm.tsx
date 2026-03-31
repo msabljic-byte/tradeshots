@@ -125,7 +125,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
 
   return (
     <div className="mx-auto w-full max-w-md">
-      <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-md">
+      <div className="rounded-2xl border border-default bg-surface p-8 shadow-md">
         <h1 className="mb-6 text-3xl font-semibold text-gray-900">
           {isSignup ? "Create your account" : "Welcome back"}
         </h1>

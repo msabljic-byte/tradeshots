@@ -302,7 +302,7 @@ export default function ScreenshotModal({
       />
 
       <div
-        className="relative z-10 flex min-h-0 min-w-0 h-full w-full overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl animate-[fadeIn_0.2s_ease-out_both]"
+        className="relative z-10 flex min-h-0 min-w-0 h-full w-full overflow-hidden rounded-2xl border border-default bg-surface shadow-xl animate-[fadeIn_0.2s_ease-out_both]"
         role="dialog"
         aria-modal="true"
       >
@@ -354,7 +354,7 @@ export default function ScreenshotModal({
         </div>
 
         {/* RIGHT: read-only details */}
-        <div className="w-[380px] shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-6">
+        <div className="w-[380px] shrink-0 overflow-y-auto border-l border-default bg-surface-muted p-6">
           <div className="mb-5">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
               Details

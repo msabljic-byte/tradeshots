@@ -1,21 +1,55 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+:root,
+:root[data-theme="light"] {
+  --background: #f9fafb;
+  --foreground: #111827;
+  --surface: #ffffff;
+  --surface-muted: #f3f4f6;
+  --border: #e5e7eb;
+  --text-muted: #6b7280;
+  --primary: #111827;
+  --primary-foreground: #ffffff;
+  --danger: #dc2626;
+}
+
+:root[data-theme="dark"] {
+  --background: #0b1220;
+  --foreground: #e5e7eb;
+  --surface: #111827;
+  --surface-muted: #1f2937;
+  --border: #374151;
+  --text-muted: #9ca3af;
+  --primary: #e5e7eb;
+  --primary-foreground: #111827;
+  --danger: #f87171;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-text-muted: var(--text-muted);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --surface: #111827;
+    --surface-muted: #1f2937;
+    --border: #374151;
+    --text-muted: #9ca3af;
+    --primary: #e5e7eb;
+    --primary-foreground: #111827;
+    --danger: #f87171;
   }
 }
 
@@ -25,6 +59,30 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   font-size: 14px; /* 0.875rem = Tailwind text-sm */
   line-height: 1.5; /* Tailwind leading-6 */
+}
+
+/* Avoid color/opacity flicker while swapping theme tokens. */
+:root.theme-changing *,
+:root.theme-changing *::before,
+:root.theme-changing *::after {
+  transition: none !important;
+}
+
+/* Semantic helpers for component migration. */
+.bg-surface {
+  background-color: var(--surface);
+}
+
+.bg-surface-muted {
+  background-color: var(--surface-muted);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.border-default {
+  border-color: var(--border);
 }
 
 @layer base {
@@ -61,7 +119,8 @@ body {
     @apply text-sm leading-6;
   }
   small {
-    @apply text-xs text-gray-500 leading-4;
+    @apply text-xs leading-4;
+    color: var(--text-muted);
   }
 }
 
@@ -88,21 +147,35 @@ body {
     @apply text-sm leading-6;
   }
   .app-secondary {
-    @apply text-xs text-gray-500 leading-4;
+    @apply text-xs leading-4;
+    color: var(--text-muted);
   }
 
   /* Premium button system */
   .btn {
-    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 ease-in-out active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-gray-300;
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 ease-in-out active:scale-[0.98] focus:outline-none focus:ring-2;
+    border: 1px solid var(--border);
   }
   .btn-primary {
-    @apply bg-black text-white hover:bg-gray-800;
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+  .btn-primary:hover {
+    opacity: 0.9;
   }
   .btn-secondary {
-    @apply bg-gray-100 text-gray-900 hover:bg-gray-200;
+    background-color: var(--surface-muted);
+    color: var(--foreground);
+  }
+  .btn-secondary:hover {
+    filter: brightness(0.96);
   }
   .btn-subtle {
-    @apply bg-transparent text-gray-600 hover:text-black;
+    @apply bg-transparent;
+    color: var(--text-muted);
+  }
+  .btn-subtle:hover {
+    color: var(--foreground);
   }
 
   /* Dropdown / popover entry animation (for conditional renders). */
@@ -119,6 +192,43 @@ body {
   .animate-dropdown-in {
     animation: dropdownIn 0.15s ease-in-out both;
   }
+}
+
+/* Safety net: keep existing gray/white utility-heavy UI readable in dark mode. */
+:root[data-theme="dark"] .bg-white {
+  background-color: var(--surface) !important;
+}
+
+:root[data-theme="dark"] .bg-gray-50,
+:root[data-theme="dark"] .bg-gray-100 {
+  background-color: var(--surface-muted) !important;
+}
+
+:root[data-theme="dark"] .border-gray-100,
+:root[data-theme="dark"] .border-gray-200,
+:root[data-theme="dark"] .border-gray-300 {
+  border-color: var(--border) !important;
+}
+
+:root[data-theme="dark"] .text-gray-400,
+:root[data-theme="dark"] .text-gray-500,
+:root[data-theme="dark"] .text-gray-600,
+:root[data-theme="dark"] .text-gray-700,
+:root[data-theme="dark"] .text-gray-800 {
+  color: var(--text-muted) !important;
+}
+
+:root[data-theme="dark"] .text-gray-900,
+:root[data-theme="dark"] .text-black {
+  color: var(--foreground) !important;
+}
+
+:root[data-theme="dark"] .hover\:bg-gray-100:hover {
+  background-color: #243041 !important;
+}
+
+:root[data-theme="dark"] .hover\:text-black:hover {
+  color: var(--foreground) !important;
 }
 
 @keyframes fadeIn {
