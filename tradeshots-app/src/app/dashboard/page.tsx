@@ -51,6 +51,16 @@ import {
   Upload,
   X,
   ArrowRight,
+  Minus,
+  MousePointer2,
+  Type,
+  Square,
+  Palette,
+  SlidersHorizontal,
+  Undo2,
+  Redo2,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 
 type ScreenshotRow = {
@@ -85,6 +95,16 @@ type AnnotationShape =
       color: string;
       size: number;
       points: Array<{ x: number; y: number }>;
+    }
+  | {
+      id: string;
+      kind: "line";
+      color: string;
+      size: number;
+      fromX: number;
+      fromY: number;
+      toX: number;
+      toY: number;
     }
   | {
       id: string;
@@ -294,6 +314,8 @@ export default function DashboardPage() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isAnnotationToolbarOpen, setIsAnnotationToolbarOpen] = useState(true);
+  const [showStrokeSizePopover, setShowStrokeSizePopover] = useState(false);
 
   const [savedViews, setSavedViews] = useState<any[]>([]);
   const [viewName, setViewName] = useState("");
@@ -338,9 +360,8 @@ export default function DashboardPage() {
   const [isMacPlatform, setIsMacPlatform] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
   const [tool, setTool] = useState<
-    "select" | "draw" | "arrow" | "text" | "highlight"
+    "select" | "draw" | "line" | "arrow" | "text" | "highlight"
   >("draw");
   const [strokeColor, setStrokeColor] = useState("#ef4444");
   const [strokeSize, setStrokeSize] = useState(3);
@@ -366,6 +387,13 @@ export default function DashboardPage() {
   const dragStartShapeRef = useRef<AnnotationShape | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
   const toastExitTimeoutRef = useRef<number | null>(null);
+  const strokeSizePopoverRef = useRef<HTMLDivElement | null>(null);
+  const annotationSaveTimeoutRef = useRef<number | null>(null);
+  const noteSaveTimeoutRef = useRef<number | null>(null);
+  const attributeSaveTimeoutRef = useRef<number | null>(null);
+  const lastAnnotationFingerprintRef = useRef("");
+  const lastNoteByScreenshotRef = useRef<Record<string, string>>({});
+  const lastAttributesByScreenshotRef = useRef<Record<string, string>>({});
 
   const multiSelectHint = isMacPlatform
       ? "⌘ to select • ⇧ to select range"
@@ -1524,35 +1552,17 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleSaveNote() {
-    if (selectedIndex === null) return;
-
+  async function handleSaveNote(screenshotId: string, noteValue: string) {
+    if (!screenshotId) return;
     setSavingNote(true);
     setError(null);
     try {
-      const tagFilterLower = tagFilter.trim().toLowerCase();
-
-      const filtered = screenshots.filter((s) => {
-        const matchesTag =
-          !tagFilterLower ||
-          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-
-        const pairs = attributesByScreenshot[s.id] ?? [];
-        const matchesAttribute =
-          filters.length === 0 ||
-          filters.every((f) =>
-            pairs.some((a) => a.key === f.key && a.value === f.value)
-          );
-
-        return matchesTag && matchesAttribute;
-      });
-
-      const shot = filtered[selectedIndex];
+      const shot = screenshots.find((s) => s.id === screenshotId);
       if (!shot) return;
 
       const { error: saveError } = await supabase
         .from("screenshots")
-        .update({ notes: currentNote, is_updated: true })
+        .update({ notes: noteValue, is_updated: true })
         .eq("id", shot.id);
 
       if (saveError) {
@@ -1566,7 +1576,7 @@ export default function DashboardPage() {
           s.id === shot.id
             ? {
                 ...s,
-                notes: currentNote,
+                notes: noteValue,
                 is_updated: true,
               }
             : s
@@ -1576,7 +1586,7 @@ export default function DashboardPage() {
       await syncSharedPlaybookAndNotifyFromScreenshotId(supabase, shot.id);
 
       setSavedNoteToast(true);
-      setTimeout(() => setSavedNoteToast(false), 2000);
+      setTimeout(() => setSavedNoteToast(false), 1200);
     } finally {
       setSavingNote(false);
     }
@@ -1584,9 +1594,10 @@ export default function DashboardPage() {
 
   async function saveAttributes(
     attrList: any[],
-    options?: { showToast?: boolean }
+    options?: { showToast?: boolean; screenshotId?: string }
   ) {
-    if (selectedIndex === null) return;
+    const screenshotId = options?.screenshotId;
+    if (!screenshotId) return;
 
     setSavingAttributes(true);
     setError(null);
@@ -1594,24 +1605,7 @@ export default function DashboardPage() {
     const showToast = options?.showToast !== false;
 
     try {
-      const tagFilterLower = tagFilter.trim().toLowerCase();
-
-      const filtered = screenshots.filter((s) => {
-        const matchesTag =
-          !tagFilterLower ||
-          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-
-        const pairs = attributesByScreenshot[s.id] ?? [];
-        const matchesAttribute =
-          filters.length === 0 ||
-          filters.every((f) =>
-            pairs.some((a) => a.key === f.key && a.value === f.value)
-          );
-
-        return matchesTag && matchesAttribute;
-      });
-
-      const screenshot = filtered[selectedIndex];
+      const screenshot = screenshots.find((s) => s.id === screenshotId);
       if (!screenshot) return;
 
       const { error: deleteError } = await supabase
@@ -1823,7 +1817,8 @@ export default function DashboardPage() {
       return;
     }
 
-    await saveAttributes(attributes);
+    if (!selectedImage?.id) return;
+    await saveAttributes(attributes, { screenshotId: selectedImage.id });
   }
 
   async function handleDeleteAttribute(index: number) {
@@ -1837,8 +1832,6 @@ export default function DashboardPage() {
       index,
     });
 
-    await saveAttributes(updated);
-
     setTimeout(() => {
       setUndoData(null);
     }, 5000);
@@ -1851,8 +1844,6 @@ export default function DashboardPage() {
     restored.splice(undoData.index, 0, undoData.attribute);
 
     setAttributes(restored);
-
-    await saveAttributes(restored);
 
     setUndoData(null);
   }
@@ -1879,6 +1870,7 @@ export default function DashboardPage() {
   const selectedImage =
     selectedIndex !== null ? filteredScreenshots[selectedIndex] ?? null : null;
   const panelWidth = isPanelOpen ? 380 : 48;
+  const annotationToolbarWidth = isAnnotationToolbarOpen ? 68 : 44;
   const profileInitials = (email ?? "?")
     .split("@")[0]
     .split(/[.\-_ ]+/)
@@ -2016,6 +2008,15 @@ export default function DashboardPage() {
         toY: shape.toY + dy,
       };
     }
+    if (shape.kind === "line") {
+      return {
+        ...shape,
+        fromX: shape.fromX + dx,
+        fromY: shape.fromY + dy,
+        toX: shape.toX + dx,
+        toY: shape.toY + dy,
+      };
+    }
     if (shape.kind === "text") {
       return { ...shape, x: shape.x + dx, y: shape.y + dy };
     }
@@ -2049,6 +2050,19 @@ export default function DashboardPage() {
     ctx.lineTo(shape.toX, shape.toY);
     ctx.fillStyle = shape.color;
     ctx.fill();
+  }
+
+  function drawLineShape(
+    ctx: CanvasRenderingContext2D,
+    shape: Extract<AnnotationShape, { kind: "line" }>
+  ) {
+    ctx.strokeStyle = shape.color;
+    ctx.lineWidth = shape.size;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(shape.fromX, shape.fromY);
+    ctx.lineTo(shape.toX, shape.toY);
+    ctx.stroke();
   }
 
   function drawHighlightShape(
@@ -2093,6 +2107,8 @@ export default function DashboardPage() {
         ctx.stroke();
       } else if (shape.kind === "arrow") {
         drawArrowShape(ctx, shape);
+      } else if (shape.kind === "line") {
+        drawLineShape(ctx, shape);
       } else if (shape.kind === "highlight") {
         drawHighlightShape(ctx, shape);
       } else if (shape.kind === "text") {
@@ -2116,6 +2132,11 @@ export default function DashboardPage() {
           maxX = Math.max(...xs);
           maxY = Math.max(...ys);
         } else if (shape.kind === "arrow") {
+          minX = Math.min(shape.fromX, shape.toX);
+          minY = Math.min(shape.fromY, shape.toY);
+          maxX = Math.max(shape.fromX, shape.toX);
+          maxY = Math.max(shape.fromY, shape.toY);
+        } else if (shape.kind === "line") {
           minX = Math.min(shape.fromX, shape.toX);
           minY = Math.min(shape.fromY, shape.toY);
           maxX = Math.max(shape.fromX, shape.toX);
@@ -2174,6 +2195,11 @@ export default function DashboardPage() {
           maxX = Math.max(...xs);
           maxY = Math.max(...ys);
         } else if (shape.kind === "arrow") {
+          minX = Math.min(shape.fromX, shape.toX);
+          minY = Math.min(shape.fromY, shape.toY);
+          maxX = Math.max(shape.fromX, shape.toX);
+          maxY = Math.max(shape.fromY, shape.toY);
+        } else if (shape.kind === "line") {
           minX = Math.min(shape.fromX, shape.toX);
           minY = Math.min(shape.fromY, shape.toY);
           maxX = Math.max(shape.fromX, shape.toX);
@@ -2341,8 +2367,12 @@ export default function DashboardPage() {
     }
   }
 
-  async function saveAnnotation() {
-    if (!selectedImage?.id) return;
+  async function saveAnnotation(
+    screenshotId: string,
+    shapes: AnnotationShape[],
+    baseDataUrl: string
+  ) {
+    if (!screenshotId) return;
 
     setSavingAnnotation(true);
     try {
@@ -2350,15 +2380,15 @@ export default function DashboardPage() {
         version: 2,
         // Keep editable shapes as source of truth.
         // If shapes exist, do not keep a baked overlay image.
-        image: annotationShapes.length > 0 ? "" : annotationBaseDataUrl,
-        shapes: annotationShapes,
+        image: shapes.length > 0 ? "" : baseDataUrl,
+        shapes,
       };
-      writeLocalAnnotation(selectedImage.id, JSON.stringify(payloadObject));
+      writeLocalAnnotation(screenshotId, JSON.stringify(payloadObject));
 
       const { error: annotationError } = await supabase
         .from("screenshots")
         .update({ annotations: payloadObject, is_updated: true })
-        .eq("id", selectedImage.id);
+        .eq("id", screenshotId);
 
       if (annotationError) {
         const msg = annotationError.message.toLowerCase();
@@ -2368,12 +2398,12 @@ export default function DashboardPage() {
           const legacy = await supabase
             .from("screenshots")
             .update({ annotation: payload, is_updated: true })
-            .eq("id", selectedImage.id);
+            .eq("id", screenshotId);
           if (!legacy.error) {
             setError(null);
             setScreenshots((prev) =>
               prev.map((s) =>
-                s.id === selectedImage.id
+                s.id === screenshotId
                   ? {
                       ...s,
                       annotations: payloadObject,
@@ -2385,7 +2415,7 @@ export default function DashboardPage() {
             );
             setAllScreenshots((prev: any[]) =>
               prev.map((s) =>
-                s.id === selectedImage.id
+                s.id === screenshotId
                   ? {
                       ...s,
                       annotations: payloadObject,
@@ -2397,7 +2427,7 @@ export default function DashboardPage() {
             );
             await syncSharedPlaybookAndNotifyFromScreenshotId(
               supabase,
-              selectedImage.id
+              screenshotId
             );
             return;
           }
@@ -2407,7 +2437,7 @@ export default function DashboardPage() {
           setError(null);
           setScreenshots((prev) =>
             prev.map((s) =>
-              s.id === selectedImage.id
+              s.id === screenshotId
                 ? {
                     ...s,
                     annotations: payloadObject,
@@ -2419,7 +2449,7 @@ export default function DashboardPage() {
           );
           setAllScreenshots((prev: any[]) =>
             prev.map((s) =>
-              s.id === selectedImage.id
+              s.id === screenshotId
                 ? {
                     ...s,
                     annotations: payloadObject,
@@ -2431,7 +2461,7 @@ export default function DashboardPage() {
           );
           await syncSharedPlaybookAndNotifyFromScreenshotId(
             supabase,
-            selectedImage.id
+            screenshotId
           );
           return;
         }
@@ -2444,7 +2474,7 @@ export default function DashboardPage() {
       // Keep list data in sync without forcing a full refetch.
       setScreenshots((prev) =>
         prev.map((s) =>
-          s.id === selectedImage.id
+          s.id === screenshotId
             ? {
                 ...s,
                 annotations: payloadObject,
@@ -2456,7 +2486,7 @@ export default function DashboardPage() {
       );
       setAllScreenshots((prev: any[]) =>
         prev.map((s) =>
-          s.id === selectedImage.id
+          s.id === screenshotId
             ? {
                 ...s,
                 annotations: payloadObject,
@@ -2469,7 +2499,7 @@ export default function DashboardPage() {
 
       await syncSharedPlaybookAndNotifyFromScreenshotId(
         supabase,
-        selectedImage.id
+        screenshotId
       );
     } finally {
       setSavingAnnotation(false);
@@ -2828,6 +2858,13 @@ export default function DashboardPage() {
         ) {
           return shape.id;
         }
+      } else if (shape.kind === "line") {
+        if (
+          distancePointToSegment(x, y, shape.fromX, shape.fromY, shape.toX, shape.toY) <=
+          Math.max(8, shape.size + 4)
+        ) {
+          return shape.id;
+        }
       } else if (shape.kind === "highlight") {
         const left = Math.min(shape.x, shape.x + shape.width);
         const top = Math.min(shape.y, shape.y + shape.height);
@@ -2947,7 +2984,78 @@ export default function DashboardPage() {
     setHoveredAnnotationId(null);
     setIsDraggingAnnotation(false);
     setTextDraft(null);
+    lastAnnotationFingerprintRef.current = `${selectedImage.id}:${JSON.stringify(
+      shapes
+    )}:${baseDataUrl}`;
   }, [selectedImage?.id, selectedImage?.annotations, selectedImage?.annotation]);
+
+  useEffect(() => {
+    if (!selectedImage?.id) return;
+    const fingerprint = `${selectedImage.id}:${JSON.stringify(annotationShapes)}:${annotationBaseDataUrl}`;
+    if (fingerprint === lastAnnotationFingerprintRef.current) return;
+    if (annotationSaveTimeoutRef.current) {
+      window.clearTimeout(annotationSaveTimeoutRef.current);
+    }
+    annotationSaveTimeoutRef.current = window.setTimeout(() => {
+      lastAnnotationFingerprintRef.current = fingerprint;
+      void saveAnnotation(selectedImage.id, annotationShapes, annotationBaseDataUrl);
+    }, 350);
+    return () => {
+      if (annotationSaveTimeoutRef.current) {
+        window.clearTimeout(annotationSaveTimeoutRef.current);
+      }
+    };
+  }, [selectedImage?.id, annotationShapes, annotationBaseDataUrl]);
+
+  useEffect(() => {
+    if (!selectedImage?.id) return;
+    const nextNote = currentNote ?? "";
+    const previous = lastNoteByScreenshotRef.current[selectedImage.id];
+    if (previous === undefined) {
+      lastNoteByScreenshotRef.current[selectedImage.id] = nextNote;
+      return;
+    }
+    if (previous === nextNote) return;
+    if (noteSaveTimeoutRef.current) {
+      window.clearTimeout(noteSaveTimeoutRef.current);
+    }
+    noteSaveTimeoutRef.current = window.setTimeout(() => {
+      lastNoteByScreenshotRef.current[selectedImage.id] = nextNote;
+      void handleSaveNote(selectedImage.id, nextNote);
+    }, 450);
+    return () => {
+      if (noteSaveTimeoutRef.current) {
+        window.clearTimeout(noteSaveTimeoutRef.current);
+      }
+    };
+  }, [selectedImage?.id, currentNote]);
+
+  useEffect(() => {
+    if (!selectedImage?.id) return;
+    if (bulkTargetIds.length > 0) return;
+    const serialized = JSON.stringify(attributes ?? []);
+    const previous = lastAttributesByScreenshotRef.current[selectedImage.id];
+    if (previous === undefined) {
+      lastAttributesByScreenshotRef.current[selectedImage.id] = serialized;
+      return;
+    }
+    if (previous === serialized) return;
+    if (attributeSaveTimeoutRef.current) {
+      window.clearTimeout(attributeSaveTimeoutRef.current);
+    }
+    attributeSaveTimeoutRef.current = window.setTimeout(() => {
+      lastAttributesByScreenshotRef.current[selectedImage.id] = serialized;
+      void saveAttributes(attributes, {
+        screenshotId: selectedImage.id,
+        showToast: false,
+      });
+    }, 500);
+    return () => {
+      if (attributeSaveTimeoutRef.current) {
+        window.clearTimeout(attributeSaveTimeoutRef.current);
+      }
+    };
+  }, [selectedImage?.id, attributes, bulkTargetIds.length]);
 
   useEffect(() => {
     if (!selectedImage) return;
@@ -2988,7 +3096,6 @@ export default function DashboardPage() {
         }
         setTextDraft({ x, y, text: "" });
         isDrawingRef.current = false;
-        setIsDrawing(false);
         return;
       }
 
@@ -3010,7 +3117,6 @@ export default function DashboardPage() {
           setIsDraggingAnnotation(false);
         }
         isDrawingRef.current = false;
-        setIsDrawing(false);
         return;
       }
 
@@ -3019,7 +3125,6 @@ export default function DashboardPage() {
       }
 
       isDrawingRef.current = true;
-      setIsDrawing(true);
       drawStartRef.current = { x, y };
 
       if (tool === "draw") {
@@ -3067,6 +3172,17 @@ export default function DashboardPage() {
       if (tool === "arrow") {
         redrawCanvasWithShapes();
         drawArrow(drawStartRef.current.x, drawStartRef.current.y, x, y);
+      }
+
+      if (tool === "line") {
+        redrawCanvasWithShapes();
+        context.strokeStyle = strokeColor;
+        context.lineWidth = strokeSize;
+        context.lineCap = "round";
+        context.beginPath();
+        context.moveTo(drawStartRef.current.x, drawStartRef.current.y);
+        context.lineTo(x, y);
+        context.stroke();
       }
 
       if (tool === "highlight") {
@@ -3161,6 +3277,26 @@ export default function DashboardPage() {
         );
       }
 
+      if (tool === "line") {
+        const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        applyShapes(
+          [
+            ...annotationShapes,
+            {
+              id,
+              kind: "line",
+              color: strokeColor,
+              size: strokeSize,
+              fromX: drawStartRef.current.x,
+              fromY: drawStartRef.current.y,
+              toX: x,
+              toY: y,
+            },
+          ],
+          { pushHistory: true }
+        );
+      }
+
       if (tool === "highlight") {
         const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const width = x - drawStartRef.current.x;
@@ -3187,7 +3323,6 @@ export default function DashboardPage() {
       }
 
       isDrawingRef.current = false;
-      setIsDrawing(false);
       currentPathRef.current = [];
     }
 
@@ -3229,12 +3364,39 @@ export default function DashboardPage() {
   }, [showMoveMenu]);
 
   useEffect(() => {
+    function handleOutsideClick(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (strokeSizePopoverRef.current?.contains(target)) return;
+      setShowStrokeSizePopover(false);
+    }
+    if (!showStrokeSizePopover) return;
+    window.addEventListener("mousedown", handleOutsideClick);
+    return () => window.removeEventListener("mousedown", handleOutsideClick);
+  }, [showStrokeSizePopover]);
+
+  useEffect(() => {
+    if (!isAnnotationToolbarOpen) {
+      setShowStrokeSizePopover(false);
+    }
+  }, [isAnnotationToolbarOpen]);
+
+  useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
         window.clearTimeout(toastTimeoutRef.current);
       }
       if (toastExitTimeoutRef.current) {
         window.clearTimeout(toastExitTimeoutRef.current);
+      }
+      if (annotationSaveTimeoutRef.current) {
+        window.clearTimeout(annotationSaveTimeoutRef.current);
+      }
+      if (noteSaveTimeoutRef.current) {
+        window.clearTimeout(noteSaveTimeoutRef.current);
+      }
+      if (attributeSaveTimeoutRef.current) {
+        window.clearTimeout(attributeSaveTimeoutRef.current);
       }
     };
   }, []);
@@ -4342,7 +4504,11 @@ export default function DashboardPage() {
                       src={filteredScreenshots[selectedIndex!].image_url}
                       alt=""
                       draggable={false}
-                      className="block max-h-[calc(100vh-24px)] max-w-[calc(100vw-460px)] cursor-default animate-[fadeIn_0.2s_ease-out] rounded-md object-contain shadow-lg"
+                      className="block cursor-default animate-[fadeIn_0.2s_ease-out] rounded-md object-contain shadow-lg"
+                      style={{
+                        maxHeight: "calc(100vh - 24px)",
+                        maxWidth: `calc(100vw - ${panelWidth + annotationToolbarWidth + 48}px)`,
+                      }}
                       onClick={(e) => e.stopPropagation()}
                     />
                     <canvas
@@ -4400,6 +4566,215 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              <div
+                className={`box-border flex h-full shrink-0 flex-col items-center border-l border-default bg-surface-muted py-3 transition-all duration-300 ${
+                  isAnnotationToolbarOpen ? "w-[68px]" : "w-[44px]"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsAnnotationToolbarOpen((prev) => !prev)}
+                  title={isAnnotationToolbarOpen ? "Collapse toolbar" : "Expand toolbar"}
+                  aria-label={isAnnotationToolbarOpen ? "Collapse toolbar" : "Expand toolbar"}
+                  className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30"
+                >
+                  {isAnnotationToolbarOpen ? (
+                    <PanelRightClose className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <PanelRightOpen className="h-4 w-4" aria-hidden />
+                  )}
+                </button>
+
+                {isAnnotationToolbarOpen && (
+                  <div className="mt-2 flex w-full flex-1 flex-col items-center gap-2 overflow-y-auto pb-2">
+                    <button
+                      type="button"
+                      title="Select"
+                      aria-label="Select"
+                      onClick={() => setTool("select")}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 ${
+                        tool === "select"
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700"
+                      }`}
+                    >
+                      <MousePointer2 className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      title="Draw"
+                      aria-label="Draw"
+                      onClick={() => setTool("draw")}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 ${
+                        tool === "draw"
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700"
+                      }`}
+                    >
+                      <Pencil className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      title="Line"
+                      aria-label="Line"
+                      onClick={() => setTool("line")}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 ${
+                        tool === "line"
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700"
+                      }`}
+                    >
+                      <Minus className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      title="Arrow"
+                      aria-label="Arrow"
+                      onClick={() => setTool("arrow")}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 ${
+                        tool === "arrow"
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700"
+                      }`}
+                    >
+                      <ArrowRight className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      title="Text"
+                      aria-label="Text"
+                      onClick={() => setTool("text")}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 ${
+                        tool === "text"
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700"
+                      }`}
+                    >
+                      <Type className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      title="Rectangle"
+                      aria-label="Rectangle"
+                      onClick={() => setTool("highlight")}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 ${
+                        tool === "highlight"
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700"
+                      }`}
+                    >
+                      <Square className="h-4 w-4" aria-hidden />
+                    </button>
+                    <label
+                      title="Color"
+                      aria-label="Color"
+                      className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus-within:ring-2 focus-within:ring-gray-400/30"
+                    >
+                      <Palette className="absolute h-4 w-4 opacity-70" aria-hidden />
+                      <input
+                        type="color"
+                        value={strokeColor}
+                        onChange={(e) => setStrokeColor(e.target.value)}
+                        className="h-6 w-6 cursor-pointer border-0 bg-transparent p-0 opacity-0"
+                      />
+                    </label>
+                    <div ref={strokeSizePopoverRef} className="relative">
+                      <button
+                        type="button"
+                        title={`Size (${strokeSize})`}
+                        aria-label="Size"
+                        onClick={() => setShowStrokeSizePopover((prev) => !prev)}
+                        className="relative flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30"
+                      >
+                        <SlidersHorizontal className="h-4 w-4 opacity-70" aria-hidden />
+                      </button>
+                      {showStrokeSizePopover && (
+                        <div className="absolute left-[42px] top-1/2 z-30 w-44 -translate-y-1/2 rounded-md border border-gray-300 bg-white p-2 shadow-lg">
+                          <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+                            <span>Size</span>
+                            <span className="font-medium text-gray-900">{strokeSize}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={1}
+                            max={12}
+                            value={strokeSize}
+                            onChange={(e) => setStrokeSize(Number(e.target.value))}
+                            className="w-full"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      title="Undo"
+                      aria-label="Undo"
+                      onClick={handleUndoAnnotation}
+                      disabled={annotationHistoryIndex <= 0}
+                      className="mt-1 flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
+                    >
+                      <Undo2 className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      title="Redo"
+                      aria-label="Redo"
+                      onClick={handleRedoAnnotation}
+                      disabled={
+                        annotationHistoryIndex < 0 ||
+                        annotationHistoryIndex >= annotationHistory.length - 1
+                      }
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
+                    >
+                      <Redo2 className="h-4 w-4" aria-hidden />
+                    </button>
+                  </div>
+                )}
+
+                {!isAnnotationToolbarOpen && (
+                  <div className="mt-2 flex w-full flex-1 flex-col items-center gap-2">
+                    <div
+                      title={`Active tool: ${tool === "highlight" ? "Rectangle" : tool}`}
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-900 bg-gray-900 text-white shadow-sm"
+                    >
+                      {tool === "select" && <MousePointer2 className="h-4 w-4" aria-hidden />}
+                      {tool === "draw" && <Pencil className="h-4 w-4" aria-hidden />}
+                      {tool === "line" && <Minus className="h-4 w-4" aria-hidden />}
+                      {tool === "arrow" && <ArrowRight className="h-4 w-4" aria-hidden />}
+                      {tool === "text" && <Type className="h-4 w-4" aria-hidden />}
+                      {tool === "highlight" && <Square className="h-4 w-4" aria-hidden />}
+                    </div>
+                    <button
+                      type="button"
+                      title="Undo"
+                      aria-label="Undo"
+                      onClick={handleUndoAnnotation}
+                      disabled={annotationHistoryIndex <= 0}
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
+                    >
+                      <Undo2 className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      title="Redo"
+                      aria-label="Redo"
+                      onClick={handleRedoAnnotation}
+                      disabled={
+                        annotationHistoryIndex < 0 ||
+                        annotationHistoryIndex >= annotationHistory.length - 1
+                      }
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
+                    >
+                      <Redo2 className="h-4 w-4" aria-hidden />
+                    </button>
+                  </div>
+                )}
+
+                {showStrokeSizePopover && !isAnnotationToolbarOpen && (
+                  <div className="mt-2 text-[10px] text-gray-500">{`Size ${strokeSize}`}</div>
+                )}
+              </div>
+
               {/* RIGHT: PANEL — only this column scrolls when content is tall */}
               <div
                 className={`box-border flex h-full min-h-0 ${isPanelOpen ? "w-[380px]" : "w-[48px]"} shrink-0 flex-col overflow-y-auto border-l border-default bg-surface-muted p-4 transition-all duration-300`}
@@ -4426,95 +4801,28 @@ export default function DashboardPage() {
 
                 {isPanelOpen && (
                   <div className="space-y-6">
-                    <div className="mb-2 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setTool("select")}
-                        className={`rounded border px-2 py-1 text-xs ${
-                          tool === "select"
-                            ? "border-gray-900 bg-gray-900 text-white"
-                            : "border-gray-300 bg-white text-gray-700"
-                        }`}
-                      >
-                        Select
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setTool("draw")}
-                        className={`rounded border px-2 py-1 text-xs ${
-                          tool === "draw"
-                            ? "border-gray-900 bg-gray-900 text-white"
-                            : "border-gray-300 bg-white text-gray-700"
-                        }`}
-                      >
-                        <Pencil className="mr-1 inline-block h-4 w-4" aria-hidden />
-                        Draw
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setTool("arrow")}
-                        className={`rounded border px-2 py-1 text-xs ${
-                          tool === "arrow"
-                            ? "border-gray-900 bg-gray-900 text-white"
-                            : "border-gray-300 bg-white text-gray-700"
-                        }`}
-                      >
-                        <ArrowRight className="mr-1 inline-block h-4 w-4" aria-hidden />
-                        Arrow
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setTool("text")}
-                        className={`rounded border px-2 py-1 text-xs ${
-                          tool === "text"
-                            ? "border-gray-900 bg-gray-900 text-white"
-                            : "border-gray-300 bg-white text-gray-700"
-                        }`}
-                      >
-                        Text
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setTool("highlight")}
-                        className={`rounded border px-2 py-1 text-xs ${
-                          tool === "highlight"
-                            ? "border-gray-900 bg-gray-900 text-white"
-                            : "border-gray-300 bg-white text-gray-700"
-                        }`}
-                      >
-                        Highlighter
-                      </button>
-
-                      <label className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700">
-                        Color
-                        <input
-                          type="color"
-                          value={strokeColor}
-                          onChange={(e) => setStrokeColor(e.target.value)}
-                          className="h-6 w-8 cursor-pointer border-0 bg-transparent p-0"
-                          title="Stroke color"
-                        />
-                      </label>
-
-                      <label className="inline-flex items-center gap-2 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700">
-                        Size
-                        <input
-                          type="range"
-                          min={1}
-                          max={12}
-                          value={strokeSize}
-                          onChange={(e) => setStrokeSize(Number(e.target.value))}
-                        />
-                        <span>{strokeSize}</span>
-                      </label>
-
+                    <div className="mb-2 space-y-2 rounded-lg border border-gray-200 bg-white p-2 text-xs text-gray-600">
+                      <div className="flex items-center justify-between">
+                        <span>Tool</span>
+                        <span className="font-medium text-gray-900">
+                          {tool === "highlight" ? "Rectangle" : tool}
+                        </span>
+                      </div>
+                      {savingAnnotation && (
+                        <div className="text-[11px] text-gray-500">Saving annotations...</div>
+                      )}
+                      <div className="flex items-center justify-between">
+                        <span>Size</span>
+                        <span className="font-medium text-gray-900">{strokeSize}</span>
+                      </div>
                       {tool === "highlight" && (
-                        <label className="inline-flex items-center gap-2 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700">
-                          Opacity
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span>Opacity</span>
+                            <span className="font-medium text-gray-900">
+                              {Math.round(highlightOpacity * 100)}%
+                            </span>
+                          </div>
                           <input
                             type="range"
                             min={5}
@@ -4523,77 +4831,42 @@ export default function DashboardPage() {
                             onChange={(e) =>
                               setHighlightOpacity(Number(e.target.value) / 100)
                             }
+                            className="w-full"
                           />
-                          <span>{Math.round(highlightOpacity * 100)}%</span>
-                        </label>
+                        </div>
                       )}
-
-                      <button
-                        type="button"
-                        onClick={handleUndoAnnotation}
-                        disabled={annotationHistoryIndex <= 0}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Undo
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleRedoAnnotation}
-                        disabled={
-                          annotationHistoryIndex < 0 ||
-                          annotationHistoryIndex >= annotationHistory.length - 1
-                        }
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Redo
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={applyTextDraft}
-                        disabled={!textDraft || !textDraft.text.trim()}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Add text
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={clearAnnotationCanvas}
-                        className="btn btn-subtle"
-                      >
-                        Clear
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={deleteSelectedAnnotation}
-                        disabled={!selectedAnnotationId}
-                        className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Delete selected
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => void exportMergedImage()}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700"
-                      >
-                        Export merged
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          applyTextDraft();
-                          void saveAnnotation();
-                        }}
-                        className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={savingAnnotation}
-                      >
-                        {savingAnnotation ? "Saving..." : "Save"}
-                      </button>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={applyTextDraft}
+                          disabled={!textDraft || !textDraft.text.trim()}
+                          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Add text
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearAnnotationCanvas}
+                          className="btn btn-subtle"
+                        >
+                          Clear
+                        </button>
+                        <button
+                          type="button"
+                          onClick={deleteSelectedAnnotation}
+                          disabled={!selectedAnnotationId}
+                          className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Delete selected
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void exportMergedImage()}
+                          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700"
+                        >
+                          Export merged
+                        </button>
+                      </div>
                     </div>
                     {tool === "select" && (
                       <p className="text-xs text-gray-500">
@@ -4677,23 +4950,14 @@ export default function DashboardPage() {
                         + Add field
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          await handleSaveAttributes();
-                        }}
-                        disabled={savingAttributes}
-                        className="mt-3 w-full btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {savingAttributes ? "Saving attributes..." : "Save attributes"}
-                      </button>
-
                       {savedAttributesToast && (
                         <div className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-green-700">
                           <Check className="w-4 h-4" aria-hidden />
                           Saved
                         </div>
+                      )}
+                      {savingAttributes && (
+                        <div className="mt-2 text-xs text-gray-500">Saving attributes...</div>
                       )}
                     </div>
 
@@ -4709,20 +4973,14 @@ export default function DashboardPage() {
                         className="mt-2 w-full h-24 rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900"
                       />
 
-                      <button
-                        type="button"
-                        onClick={handleSaveNote}
-                        disabled={savingNote}
-                        className="mt-2 w-full btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {savingNote ? "Saving note..." : "Save note"}
-                      </button>
-
                       {savedNoteToast && (
                         <div className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-green-700">
                           <Check className="w-4 h-4" aria-hidden />
                           Saved
                         </div>
+                      )}
+                      {savingNote && (
+                        <div className="mt-2 text-xs text-gray-500">Saving note...</div>
                       )}
                     </div>
                   </div>
@@ -4737,7 +4995,7 @@ export default function DashboardPage() {
               aria-label="Close modal"
               className="fixed top-4 z-[2147483646] flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white shadow-lg transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900 cursor-pointer"
               style={{
-                right: `clamp(1rem, calc(${panelWidth}px + 1rem), calc(100vw - 3rem))`,
+                right: `clamp(1rem, calc(${panelWidth + annotationToolbarWidth}px + 1rem), calc(100vw - 3rem))`,
               }}
             >
               <X className="w-5 h-5" aria-hidden />
@@ -4784,7 +5042,7 @@ export default function DashboardPage() {
                     group-hover:opacity-100
                   "
                   style={{
-                    right: `clamp(1rem, calc(${panelWidth}px + 1rem), calc(100vw - 3rem))`,
+                    right: `clamp(1rem, calc(${panelWidth + annotationToolbarWidth}px + 1rem), calc(100vw - 3rem))`,
                   }}
                 >
                   <ChevronRight className="w-5 h-5" aria-hidden />
