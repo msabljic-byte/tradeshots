@@ -1,3 +1,9 @@
+/**
+ * Root layout for the Tradeshots Next.js app (App Router).
+ * - Loads Geist fonts and global CSS.
+ * - Injects a tiny inline script before paint to set `data-theme` from localStorage or system preference,
+ *   avoiding a flash of wrong theme on hard reload (pairs with `src/lib/theme.ts` and `globals.css`).
+ */
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";

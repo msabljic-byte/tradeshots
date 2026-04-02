@@ -1,3 +1,7 @@
+/**
+ * Client-side theme helpers: read/write `localStorage`, apply `data-theme` on `<html>`,
+ * and briefly add `theme-changing` to suppress transition flicker (see `globals.css`).
+ */
 export type ThemeMode = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "theme";

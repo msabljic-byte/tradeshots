@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Sign-up page: email/password via `AuthForm`; redirects to `/dashboard` when a session exists.
+ *
+ * `useEffect` (see `// useEffect:`): same redirect pattern as login — session check + `onAuthStateChange`.
+ */
 import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,6 +14,7 @@ import { supabase } from "@/lib/supabaseClient";
 export default function SignupPage() {
   const router = useRouter();
 
+  // useEffect: redirect authenticated users away from signup; cleanup auth subscription on unmount.
   useEffect(() => {
     let isMounted = true;
 

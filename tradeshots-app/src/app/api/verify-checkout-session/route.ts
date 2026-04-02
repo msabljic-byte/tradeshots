@@ -1,3 +1,7 @@
+/**
+ * Verifies a Checkout Session after redirect: payment status + metadata match (playbook share id, user id).
+ * Client uses `authorized: true` to unlock import on `/playbook/[id]?success=true&session_id=...`.
+ */
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 

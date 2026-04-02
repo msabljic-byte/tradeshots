@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Requests a Supabase password-reset email. The redirect URL should match production; currently points at
+ * `/update-password` (ensure `NEXT_PUBLIC` site URL in Supabase matches deployment).
+ */
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 

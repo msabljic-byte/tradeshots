@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * Completes password reset: expects an authenticated recovery session from the email link,
+ * then calls `supabase.auth.updateUser({ password })` and sends the user to the dashboard.
+ *
+ * `useEffect` (see `// useEffect:`): one-time session probe for recovery link validity.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -17,6 +23,7 @@ export default function UpdatePasswordPage() {
 
   const [updating, setUpdating] = useState(false);
 
+  // useEffect: read `getSession` once — sets `hasSession` / `checkingSession` for “invalid link” vs form.
   useEffect(() => {
     let mounted = true;
 

@@ -1,5 +1,22 @@
 "use client";
 
+/**
+ * Dashboard — main authenticated surface for Tradeshots.
+ *
+ * Responsibilities (high level):
+ * - Session gate: loads user, redirects to login if unauthenticated.
+ * - Playbooks: nested `folders`, CRUD, drag-and-drop screenshots between folders, share links (`share_id`),
+ *   optional paid sharing (Stripe is handled on the public `/playbook/[id]` page).
+ * - Screenshots: grid with tag search, attribute filters, multi-select, bulk delete/attributes, saved “views”.
+ * - Detail panel: notes (debounced save), trade attributes, voice memos (source vs private on imported shots),
+ *   canvas annotations (draw, line, arrow, text, highlight) with undo/redo and persistence to Supabase.
+ * - Sync: when the author edits a shared playbook, RPCs (`notifyPlaybookUpdate` etc.) sync importer copies
+ *   and notify; `is_new` / `is_updated` drive UI highlights; realtime subscription refreshes the grid.
+ *
+ * Data: Supabase (`tables` + Storage). Large file by design — search for section banners below.
+ *
+ * Navigation: every `useEffect` is preceded by a short `// useEffect:` line (what it does and key deps).
+ */
 import {
   useCallback,
   useEffect,
@@ -67,6 +84,7 @@ import {
   PanelRightOpen,
 } from "lucide-react";
 
+/** Row shape for `screenshots` + UI-only fields. */
 type ScreenshotRow = {
   id: string;
   image_url: string;
@@ -154,6 +172,7 @@ type AnnotationShape =
       height: number;
     };
 
+/** Normalizes `screenshots.annotation` / `annotations` from DB (stringified JSON, legacy shapes, or nested). */
 function parseAnnotationValue(raw: unknown): {
   image: string;
   shapes: AnnotationShape[];
@@ -316,6 +335,10 @@ function getNotificationIcon(
   }
 }
 
+/**
+ * Single-page dashboard: sidebar (folders, profile, notifications), main grid, screenshot modal/editor.
+ * All handlers close over Supabase; prefer `fetchScreenshots` / `fetchFolders` after mutations.
+ */
 export default function DashboardPage() {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
@@ -460,6 +483,7 @@ export default function DashboardPage() {
       ? "⌘ to select • ⇧ to select range"
       : "Ctrl to select • Shift to select range";
 
+  // --- Toast helpers & lazy image tracking ---
   function handleImageLoaded(id: string) {
     setLoadedImages((prev) => ({ ...prev, [id]: true }));
   }
@@ -489,6 +513,7 @@ export default function DashboardPage() {
     }, TOAST_TOTAL_MS);
   }
 
+  // useEffect: initialize theme from localStorage or system preference once on mount.
   useEffect(() => {
     const stored = getStoredTheme();
     if (stored) {
@@ -642,6 +667,7 @@ export default function DashboardPage() {
     setFilters((prev) => prev.filter((_, i) => i !== index));
   }
 
+  // --- Load screenshots for current user / active folder; hydrates tags, attributes, local annotation overrides ---
   const fetchScreenshots = async () => {
     setLoading(true);
     setAttributeKeyValuesByScreenshot({});
@@ -788,6 +814,7 @@ export default function DashboardPage() {
     setLoading(false);
   };
 
+  // Stable ref so visibility/realtime callbacks always call the latest fetchScreenshots without stale closures.
   const fetchScreenshotsRef = useRef(fetchScreenshots);
   useEffect(() => {
     fetchScreenshotsRef.current = fetchScreenshots;
@@ -803,6 +830,7 @@ export default function DashboardPage() {
     setAllAttributes(data ?? []);
   }, []);
 
+  // --- Saved filter views (`saved_views`) and folder tree (`folders`) ---
   async function fetchSavedViews() {
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) {
@@ -1113,6 +1141,7 @@ export default function DashboardPage() {
     );
   }, []);
 
+  // useEffect: first load — require session, set email, pull screenshots, attributes, notifications; then clear session gate.
   useEffect(() => {
     async function loadDashboardData() {
       const {
@@ -1136,6 +1165,7 @@ export default function DashboardPage() {
     });
   }, [router, fetchAllAttributes]);
 
+  // --- When switching folders: clear NEW/UPDATED badges on the folder we left, then refetch grid ---
   useEffect(() => {
     if (checkingSession) return;
 
@@ -1171,7 +1201,7 @@ export default function DashboardPage() {
     void run();
   }, [activeFolderId, checkingSession]);
 
-  // Refetch when the tab regains focus so importer copies pick up server-side UPDATED/NEW without a manual reload.
+  // useEffect: visibility — refetch when user returns to the tab (sync importer rows without full reload).
   useEffect(() => {
     if (checkingSession) return;
     function onVisibility() {
@@ -1183,7 +1213,7 @@ export default function DashboardPage() {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [checkingSession]);
 
-  // Refresh grid when this user's screenshot rows change (requires `screenshots` in the supabase_realtime publication).
+  // useEffect: Supabase Realtime on `screenshots` — live grid updates when rows change (requires table in publication).
   useEffect(() => {
     if (checkingSession) return;
     let cancelled = false;
@@ -1235,14 +1265,17 @@ export default function DashboardPage() {
     };
   }, [checkingSession]);
 
+  // useEffect: load saved filter views once.
   useEffect(() => {
     fetchSavedViews();
   }, []);
 
+  // useEffect: load folder tree once.
   useEffect(() => {
     fetchFolders();
   }, []);
 
+  // useEffect: sync description textarea when active folder or folder list changes.
   useEffect(() => {
     if (!activeFolderId) {
       setDescription("");
@@ -1253,15 +1286,18 @@ export default function DashboardPage() {
     setDescription(String(f?.description ?? ""));
   }, [activeFolderId, folders]);
 
+  // useEffect: client-only flag (e.g. portals that must not run SSR).
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  // useEffect: keyboard hint copy (Mac vs Windows) for multi-select.
   useEffect(() => {
     if (typeof navigator === "undefined") return;
     setIsMacPlatform(navigator.platform.includes("Mac"));
   }, []);
 
+  // useEffect: close profile menu and notification panel on outside click.
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Element | null;
@@ -1277,6 +1313,7 @@ export default function DashboardPage() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
+  // useEffect: global shortcuts — ⌘/Ctrl+K command palette, ⌘/Ctrl+A select visible grid, Escape clear selection.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -1316,6 +1353,7 @@ export default function DashboardPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [screenshots, tagFilter, filters, attributeKeyValuesByScreenshot]);
 
+  // useEffect: lock body scroll while screenshot detail modal is open.
   useEffect(() => {
     if (selectedIndex === null) return;
     const html = document.documentElement;
@@ -1330,6 +1368,7 @@ export default function DashboardPage() {
     };
   }, [selectedIndex]);
 
+  // useEffect: refresh global attribute list when `fetchAllAttributes` identity updates (keeps autocomplete in sync).
   useEffect(() => {
     fetchAllAttributes();
   }, [fetchAllAttributes]);
@@ -1458,6 +1497,7 @@ export default function DashboardPage() {
     return valuesForKey.filter((v) => v.toLowerCase().includes(term));
   }, [searchTerm, valuesForKey]);
 
+  // useEffect: arrow keys navigate between screenshots in the open modal (respects tag + attribute filters).
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -1515,6 +1555,7 @@ export default function DashboardPage() {
     selectedIndex,
   ]);
 
+  // useEffect: Escape always closes the screenshot modal (dedicated listener; runs once).
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -1526,6 +1567,7 @@ export default function DashboardPage() {
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
+  // useEffect: double rAF so modal CSS transition can run after open (staggered enter state).
   useEffect(() => {
     if (selectedIndex === null) {
       setModalEntered(false);
@@ -1544,6 +1586,7 @@ export default function DashboardPage() {
     };
   }, [selectedIndex]);
 
+  // useEffect: when selection changes, hydrate note field + reset voice error from the filtered screenshot row.
   useEffect(() => {
     if (selectedIndex === null) {
       setCurrentNote("");
@@ -1580,6 +1623,7 @@ export default function DashboardPage() {
     attributesByScreenshot,
   ]);
 
+  // useEffect: stop voice memo playback when switching screenshots.
   useEffect(() => {
     if (!audioPlaybackRef.current) return;
     audioPlaybackRef.current.pause();
@@ -1587,6 +1631,7 @@ export default function DashboardPage() {
     setIsPlayingVoiceMemo(false);
   }, [selectedIndex]);
 
+  // useEffect: enumerate mic/speaker devices on mount and on hardware changes.
   useEffect(() => {
     void refreshAudioDevices();
     if (!navigator.mediaDevices?.addEventListener) return;
@@ -1598,11 +1643,13 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // useEffect: apply chosen audio output device to the memo player when device or shot changes.
   useEffect(() => {
     void applySelectedOutputDevice(audioPlaybackRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOutputDeviceId, selectedIndex]);
 
+  // useEffect: load `trade_attributes` rows for the currently selected screenshot (respects filters).
   useEffect(() => {
     let cancelled = false;
 
@@ -1654,6 +1701,7 @@ export default function DashboardPage() {
     attributesByScreenshot,
   ]);
 
+  // useEffect: closing modal clears bulk-edit and undo state tied to selection.
   useEffect(() => {
     if (selectedIndex === null) {
       setUndoData(null);
@@ -1662,6 +1710,7 @@ export default function DashboardPage() {
     }
   }, [selectedIndex]);
 
+  // --- Auth ---
   async function handleLogout() {
     setSigningOut(true);
     setError(null);
@@ -1677,6 +1726,7 @@ export default function DashboardPage() {
     }
   }
 
+  // --- Notes: persist to Supabase, mark updated, trigger shared-playbook sync for importers ---
   async function handleSaveNote(screenshotId: string, noteValue: string) {
     if (!screenshotId) return;
     setSavingNote(true);
@@ -1717,6 +1767,7 @@ export default function DashboardPage() {
     }
   }
 
+  // --- Voice memos: MediaRecorder, optional input/output device selection, upload to storage + DB columns ---
   async function readVoiceMemoDurationMs(blob: Blob): Promise<number | null> {
     return new Promise((resolve) => {
       const audio = document.createElement("audio");
@@ -2334,6 +2385,7 @@ export default function DashboardPage() {
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "?";
 
+  // --- Bulk selection: apply attributes to many screenshots or delete in one shot ---
   async function openBulkModal() {
     const ids = selectedIds.filter(Boolean).map((id) => String(id));
     const firstId = ids[0];
@@ -2430,6 +2482,7 @@ export default function DashboardPage() {
     await fetchScreenshots();
   }
 
+  // --- Annotation canvas: history stack, hit-testing, transforms, sync to `screenshots.annotations` ---
   function pushShapesHistory(nextShapes: AnnotationShape[]) {
     setAnnotationHistory((prev) => {
       const trimmed = prev.slice(0, annotationHistoryIndex + 1);
@@ -3498,6 +3551,7 @@ export default function DashboardPage() {
     return null;
   }
 
+  // useEffect: command palette — reset or clamp active row when open state or list length changes.
   useEffect(() => {
     if (!isCommandOpen) {
       setCommandActiveIndex(-1);
@@ -3514,6 +3568,7 @@ export default function DashboardPage() {
     );
   }, [isCommandOpen, commandItems.length]);
 
+  // useEffect: command palette keyboard — arrow navigation and Enter to run highlighted item.
   useEffect(() => {
     if (!isCommandOpen) return;
 
@@ -3550,6 +3605,7 @@ export default function DashboardPage() {
     return () => window.removeEventListener("keydown", handleCommandNav);
   }, [isCommandOpen, commandItems, commandActiveIndex]);
 
+  // useEffect: annotation canvas — match canvas pixel size to displayed image, redraw on resize or shape data.
   useEffect(() => {
     if (!selectedImage) return;
     const canvas = canvasRef.current;
@@ -3578,6 +3634,7 @@ export default function DashboardPage() {
     selectedAnnotationId,
   ]);
 
+  // useEffect: when opening a screenshot, hydrate annotation state from DB (vector shapes and/or flattened image).
   useEffect(() => {
     if (!selectedImage) return;
     const parsed = parseAnnotationValue(
@@ -3601,6 +3658,7 @@ export default function DashboardPage() {
     )}:${baseDataUrl}`;
   }, [selectedImage?.id, selectedImage?.annotations, selectedImage?.annotation]);
 
+  // useEffect: debounced persist of annotations to Supabase + shared-playbook sync (350ms idle).
   useEffect(() => {
     if (!selectedImage?.id) return;
     const fingerprint = `${selectedImage.id}:${JSON.stringify(annotationShapes)}:${annotationBaseDataUrl}`;
@@ -3619,6 +3677,7 @@ export default function DashboardPage() {
     };
   }, [selectedImage?.id, annotationShapes, annotationBaseDataUrl]);
 
+  // useEffect: debounced note save while typing in the detail panel (450ms idle).
   useEffect(() => {
     if (!selectedImage?.id) return;
     const nextNote = currentNote ?? "";
@@ -3642,6 +3701,7 @@ export default function DashboardPage() {
     };
   }, [selectedImage?.id, currentNote]);
 
+  // useEffect: debounced trade-attribute save (skips while bulk modal is active).
   useEffect(() => {
     if (!selectedImage?.id) return;
     if (bulkTargetIds.length > 0) return;
@@ -3669,6 +3729,7 @@ export default function DashboardPage() {
     };
   }, [selectedImage?.id, attributes, bulkTargetIds.length]);
 
+  // useEffect: Delete/Backspace removes selected annotation (ignored when typing in inputs).
   useEffect(() => {
     if (!selectedImage) return;
     function handleDeleteKey(e: KeyboardEvent) {
@@ -3684,12 +3745,14 @@ export default function DashboardPage() {
     return () => window.removeEventListener("keydown", handleDeleteKey);
   }, [selectedImage?.id, selectedAnnotationId]);
 
+  // useEffect: clear resize-handle hover when nothing is selected.
   useEffect(() => {
     if (!selectedAnnotationId) {
       setHoveredResizeHandleIndex(null);
     }
   }, [selectedAnnotationId]);
 
+  // useEffect: canvas pointer — select tool (hit-test, drag, resize), drawing tools, stroke paths, highlights.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -4021,6 +4084,7 @@ export default function DashboardPage() {
     annotationHistoryIndex,
   ]);
 
+  // useEffect: close bulk “move to folder” menu on any click while open.
   useEffect(() => {
     function handleClickOutside() {
       setShowMoveMenu(false);
@@ -4035,6 +4099,7 @@ export default function DashboardPage() {
     };
   }, [showMoveMenu]);
 
+  // useEffect: dismiss stroke-width popover on outside mousedown.
   useEffect(() => {
     function handleOutsideClick(e: MouseEvent) {
       const target = e.target as Node | null;
@@ -4047,12 +4112,14 @@ export default function DashboardPage() {
     return () => window.removeEventListener("mousedown", handleOutsideClick);
   }, [showStrokeSizePopover]);
 
+  // useEffect: collapsing annotation toolbar also closes stroke popover.
   useEffect(() => {
     if (!isAnnotationToolbarOpen) {
       setShowStrokeSizePopover(false);
     }
   }, [isAnnotationToolbarOpen]);
 
+  // useEffect: unmount cleanup — timers, media recorder, mic stream, audio playback.
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
@@ -4085,6 +4152,7 @@ export default function DashboardPage() {
     };
   }, []);
 
+  // useEffect: restore sidebar width from localStorage on mount (clamped 200–500px).
   useEffect(() => {
     try {
       const saved = localStorage.getItem("sidebarWidth");
@@ -4099,6 +4167,7 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // useEffect: persist sidebar width after user changes (skip first run to avoid overwriting with default).
   useEffect(() => {
     if (skipSidebarPersistRef.current) {
       skipSidebarPersistRef.current = false;
@@ -4111,6 +4180,7 @@ export default function DashboardPage() {
     }
   }, [sidebarWidth]);
 
+  // --- Render: resizable sidebar (folders, profile, notifications) + main grid + modal editor ---
   return (
     <div className="flex h-screen bg-background">
       <div

@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Shared email/password form for login and signup. Handles confirmation flows (resend email) and
+ * routes to `/dashboard` on successful password sign-in or auto-confirmed signup.
+ */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";

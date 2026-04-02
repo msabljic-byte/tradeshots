@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * Public shared playbook page: `/playbook/[shareId]`.
+ * Loads folder + screenshots by `folders.share_id`; supports free preview/unlock, paid Stripe gate,
+ * and “Import playbook” which copies rows into the signed-in user’s account (`user_playbooks`, new folder, screenshots).
+ * Optional columns/RPCs are handled gracefully when the Supabase schema is behind the UI.
+ *
+ * Each `useEffect` below is prefixed with `// useEffect:` describing its role.
+ */
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -185,6 +193,7 @@ export default function PublicPlaybookPage() {
     }
   }
 
+  // useEffect: unmount — clear toast timers to avoid setState after unmount.
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
@@ -393,6 +402,7 @@ export default function PublicPlaybookPage() {
     }
   }
 
+  // useEffect: paid playbooks — grant access from Stripe return (`?success=true&session_id=`) via verify API; free playbooks get access immediately.
   useEffect(() => {
     if (!folder) return;
     const successParam =
@@ -460,6 +470,7 @@ export default function PublicPlaybookPage() {
     void verifyPayment();
   }, [folder]);
 
+  // useEffect: load shared folder + screenshots + trade_attributes by `share_id` (runs when `shareId` from route changes).
   useEffect(() => {
     async function load() {
       if (!shareId) {

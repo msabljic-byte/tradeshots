@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * Dropzone + file picker + clipboard paste for uploading images to Supabase Storage and inserting a
+ * `screenshots` row. When `folderId` is set, notifies shared-playbook importers after upload (`new_content`).
+ *
+ * The single `useEffect` registers a window `paste` listener (see `// useEffect:` there).
+ */
 import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { syncSharedPlaybookAndNotifyImporters } from "@/lib/notifyPlaybookUpdate";
@@ -157,6 +163,7 @@ export default function ScreenshotUploader({
     }
   }
 
+  // useEffect: global paste — if clipboard has an image, upload it (same path as file picker).
   useEffect(() => {
     const handlePaste = async (event: ClipboardEvent) => {
       if (!event.clipboardData) return;

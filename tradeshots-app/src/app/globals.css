@@ -1,3 +1,8 @@
+/**
+ * Global styles: Tailwind v4 entry, design tokens for light/dark (`data-theme`),
+ * component utility classes (`.btn`, `.app-container`), animations, and dark-mode overrides
+ * for legacy gray Tailwind classes used in the UI.
+ */
 @import "tailwindcss";
 
 :root,

@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * Full-screen modal to browse screenshots: base image + overlay (flattened data URL or vector shapes),
+ * keyboard navigation (Esc, arrows), and a read-only side panel (tags, notes, voice memo, trade attributes).
+ * Editing is intentionally not implemented here (see dashboard annotation editor for authoring).
+ *
+ * Each `useEffect` is prefixed with `// useEffect:` (sync state, canvas draw, keyboard).
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
@@ -75,6 +82,7 @@ function formatVoiceDuration(durationMs: number | null | undefined): string | nu
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/** Accepts legacy string blobs, `{ image, shapes }`, or shape arrays; used for shared playbook + modal display. */
 function parseAnnotationValue(raw: unknown): {
   image: string;
   shapes: AnnotationShape[];
@@ -153,6 +161,7 @@ export default function ScreenshotModal({
     return parseAnnotationValue(screenshot.annotations ?? screenshot.annotation);
   }, [screenshot]);
 
+  // useEffect: when the active screenshot changes, push parsed overlay URL + vector shapes into React state.
   useEffect(() => {
     if (!screenshot) return;
     // follow requested behavior: structured data becomes annotations state
@@ -160,6 +169,7 @@ export default function ScreenshotModal({
     setAnnotations(parsed.shapes ?? []);
   }, [screenshot?.id, parsed.image, parsed.shapes]);
 
+  // useEffect: size canvas to image, draw raster overlay (if any) then vector annotations; listen for window resize.
   useEffect(() => {
     if (!screenshot) return;
     const canvas = canvasRef.current;
@@ -274,6 +284,7 @@ export default function ScreenshotModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenshot?.id, overlayImageUrl, annotations]);
 
+  // useEffect: keyboard — Esc closes modal; Left/Right move selection within `screenshots`.
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") {

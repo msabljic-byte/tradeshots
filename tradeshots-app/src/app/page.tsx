@@ -1,3 +1,7 @@
+/**
+ * Marketing / placeholder home route (default Create Next App content).
+ * Authenticated work happens under `/dashboard`; this page is not the main product entry.
+ */
 import Image from "next/image";
 
 export default function Home() {

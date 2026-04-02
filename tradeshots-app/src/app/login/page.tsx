@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * Login: email/password + Google OAuth. Preserves `?next=/path` through OAuth redirect so shared playbooks
+ * can send users here and return them to `/playbook/...` after sign-in.
+ *
+ * `useEffect` (see `// useEffect:`): redirect if already logged in; subscribe to auth changes.
+ */
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -17,6 +23,7 @@ function LoginPageInner() {
   const [oauthLoading, setOauthLoading] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
+  // useEffect: on mount, skip form if session exists; keep listening until user signs in (then `replace(nextPath)`).
   useEffect(() => {
     let isMounted = true;
 

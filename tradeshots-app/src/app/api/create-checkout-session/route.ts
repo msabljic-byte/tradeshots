@@ -1,3 +1,8 @@
+/**
+ * Creates a Stripe Checkout Session for purchasing access to a paid shared playbook.
+ * Looks up the folder by `share_id`, builds a one-off price from `folders.price` (EUR, cents),
+ * and returns `{ sessionId }` for `stripe.redirectToCheckout` on the client.
+ */
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabase } from "@/lib/supabaseClient";
