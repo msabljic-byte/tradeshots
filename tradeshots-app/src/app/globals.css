@@ -5,6 +5,9 @@
  */
 @import "tailwindcss";
 
+/* Map Tailwind's `dark:` variant to the app's data-theme system. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root,
 :root[data-theme="light"] {
   --background: #f9fafb;
@@ -234,6 +237,39 @@ body {
 
 :root[data-theme="dark"] .hover\:text-black:hover {
   color: var(--foreground) !important;
+}
+
+/* Ensure explicit Tailwind dark utilities win over legacy gray safety-net rules above. */
+:root[data-theme="dark"] .dark\:bg-gray-700 {
+  background-color: rgb(55 65 81) !important;
+}
+
+:root[data-theme="dark"] .dark\:bg-gray-800 {
+  background-color: rgb(31 41 55) !important;
+}
+
+:root[data-theme="dark"] .dark\:bg-gray-900 {
+  background-color: rgb(17 24 39) !important;
+}
+
+:root[data-theme="dark"] .dark\:text-gray-100 {
+  color: rgb(243 244 246) !important;
+}
+
+:root[data-theme="dark"] .dark\:text-gray-200 {
+  color: rgb(229 231 235) !important;
+}
+
+:root[data-theme="dark"] .dark\:text-gray-400 {
+  color: rgb(156 163 175) !important;
+}
+
+:root[data-theme="dark"] .dark\:hover\:bg-gray-700:hover {
+  background-color: rgb(55 65 81) !important;
+}
+
+:root[data-theme="dark"] .dark\:hover\:text-gray-200:hover {
+  color: rgb(229 231 235) !important;
 }
 
 @keyframes fadeIn {

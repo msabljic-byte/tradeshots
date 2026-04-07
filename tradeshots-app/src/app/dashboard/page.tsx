@@ -64,6 +64,7 @@ import {
   Search,
   Sun,
   Sparkles,
+  MessageSquare,
   Trash2,
   Upload,
   X,
@@ -395,7 +396,7 @@ export default function DashboardPage() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareModalFolder, setShareModalFolder] = useState<any | null>(null);
   const [isPaid, setIsPaid] = useState(false);
-  const [price, setPrice] = useState(0);
+  const [price, setPrice] = useState("");
   const [shareSaving, setShareSaving] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState(280);
@@ -416,6 +417,7 @@ export default function DashboardPage() {
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<string>("");
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<string>("");
   const [attributes, setAttributes] = useState<any[]>([]);
+  const [attributesDirty, setAttributesDirty] = useState(false);
   const [undoData, setUndoData] = useState<{
     attribute: any;
     index: number;
@@ -960,7 +962,8 @@ export default function DashboardPage() {
   function openShareModal(folder: any) {
     setShareModalFolder(folder);
     setIsPaid(Boolean(folder?.is_paid));
-    setPrice(Number(folder?.price ?? 0));
+    const nextPrice = Number(folder?.price ?? 0);
+    setPrice(nextPrice > 0 ? String(nextPrice) : "");
     setShareModalOpen(true);
   }
 
@@ -988,6 +991,20 @@ export default function DashboardPage() {
         .eq("id", folder.id);
 
       if (shareError) {
+        if (isOptionalSchemaMissing(shareError)) {
+          // Older schema: fall back to minimum share enable via share_id only.
+          const fallback = await supabase
+            .from("folders")
+            .update({ share_id: shareId })
+            .eq("id", folder.id);
+          if (!fallback.error) {
+            showToast(
+              "Sharing enabled, but pricing/public columns are missing in DB. Run latest migrations to enable paid/public flags."
+            );
+            await fetchFolders();
+            return true;
+          }
+        }
         setError(
           shareError.message.toLowerCase().includes("share_id")
             ? "folders.share_id column is missing. Please run DB migration to enable sharing."
@@ -1010,6 +1027,20 @@ export default function DashboardPage() {
       .eq("id", folder.id);
 
     if (shareError) {
+      if (isOptionalSchemaMissing(shareError)) {
+        // Older schema: keep sharing link intact even when pricing/public columns are unavailable.
+        const fallback = await supabase
+          .from("folders")
+          .update({ share_id: shareId })
+          .eq("id", folder.id);
+        if (!fallback.error) {
+          showToast(
+            "Pricing/public settings require DB migration. Share link remains active."
+          );
+          await fetchFolders();
+          return true;
+        }
+      }
       setError(shareError.message);
       return false;
     }
@@ -1030,6 +1061,17 @@ export default function DashboardPage() {
       .eq("id", folder.id);
 
     if (error) {
+      if (isOptionalSchemaMissing(error)) {
+        // Older schema: still disable sharing by clearing share_id only.
+        const fallback = await supabase
+          .from("folders")
+          .update({ share_id: null })
+          .eq("id", folder.id);
+        if (!fallback.error) {
+          await fetchFolders();
+          return true;
+        }
+      }
       setError(
         error.message.toLowerCase().includes("share_id")
           ? "folders.share_id column is missing. Please run DB migration to enable sharing."
@@ -1044,15 +1086,16 @@ export default function DashboardPage() {
 
   async function saveShareSettings() {
     if (!shareModalFolder) return;
+    const parsedPrice = Number(price);
 
-    if (isPaid && (!Number.isFinite(price) || price <= 0)) {
+    if (isPaid && (!Number.isFinite(parsedPrice) || parsedPrice <= 0)) {
       showToast("Price must be greater than 0.");
       return;
     }
 
     setShareSaving(true);
     try {
-      const ok = await makePublic(shareModalFolder, isPaid, price);
+      const ok = await makePublic(shareModalFolder, isPaid, parsedPrice);
       if (ok) showToast("Playbook is now public.");
       closeShareModal();
     } catch {
@@ -1655,7 +1698,10 @@ export default function DashboardPage() {
 
     async function fetchAttributes() {
       if (selectedIndex === null) {
-        if (!cancelled) setAttributes([]);
+        if (!cancelled) {
+          setAttributes([]);
+          setAttributesDirty(false);
+        }
         return;
       }
 
@@ -1678,7 +1724,10 @@ export default function DashboardPage() {
 
       const screenshot = filtered[selectedIndex];
       if (!screenshot) {
-        if (!cancelled) setAttributes([]);
+        if (!cancelled) {
+          setAttributes([]);
+          setAttributesDirty(false);
+        }
         return;
       }
 
@@ -1687,7 +1736,10 @@ export default function DashboardPage() {
         .select("*")
         .eq("screenshot_id", screenshot.id);
 
-      if (!cancelled) setAttributes(data || []);
+      if (!cancelled) {
+        setAttributes(data || []);
+        setAttributesDirty(false);
+      }
     }
 
     fetchAttributes();
@@ -1727,8 +1779,13 @@ export default function DashboardPage() {
   }
 
   // --- Notes: persist to Supabase, mark updated, trigger shared-playbook sync for importers ---
-  async function handleSaveNote(screenshotId: string, noteValue: string) {
+  async function handleSaveNote(
+    screenshotId: string,
+    noteValue: string,
+    options?: { showToast?: boolean }
+  ) {
     if (!screenshotId) return;
+    const showToast = options?.showToast !== false;
     setSavingNote(true);
     setError(null);
     try {
@@ -1760,8 +1817,10 @@ export default function DashboardPage() {
 
       await syncSharedPlaybookAndNotifyFromScreenshotId(supabase, shot.id);
 
-      setSavedNoteToast(true);
-      setTimeout(() => setSavedNoteToast(false), 1200);
+      if (showToast) {
+        setSavedNoteToast(true);
+        setTimeout(() => setSavedNoteToast(false), 1200);
+      }
     } finally {
       setSavingNote(false);
     }
@@ -2323,6 +2382,7 @@ export default function DashboardPage() {
 
     const updated = attributes.filter((_, i) => i !== index);
     setAttributes(updated);
+    setAttributesDirty(true);
 
     setUndoData({
       attribute: removed,
@@ -2341,6 +2401,7 @@ export default function DashboardPage() {
     restored.splice(undoData.index, 0, undoData.attribute);
 
     setAttributes(restored);
+    setAttributesDirty(true);
 
     setUndoData(null);
   }
@@ -3268,7 +3329,9 @@ export default function DashboardPage() {
               className={`
                 group flex min-w-0 cursor-pointer items-center gap-2 rounded-lg px-3 py-2
                 transition-all duration-150 ease-in-out select-none
-                ${isActive ? "bg-gray-200 text-gray-900 font-semibold" : "text-gray-700 hover:bg-gray-100"}
+                ${isActive
+                  ? "bg-gray-200 text-gray-900 font-semibold dark:bg-gray-700 dark:text-gray-100"
+                  : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"}
                 ${draggedScreenshotId.length > 0 ? "hover:bg-blue-100" : ""}
                 ${hoverFolderId === folder.id ? "bg-blue-100" : ""}
               `}
@@ -3692,7 +3755,7 @@ export default function DashboardPage() {
     }
     noteSaveTimeoutRef.current = window.setTimeout(() => {
       lastNoteByScreenshotRef.current[selectedImage.id] = nextNote;
-      void handleSaveNote(selectedImage.id, nextNote);
+      void handleSaveNote(selectedImage.id, nextNote, { showToast: false });
     }, 450);
     return () => {
       if (noteSaveTimeoutRef.current) {
@@ -3705,6 +3768,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!selectedImage?.id) return;
     if (bulkTargetIds.length > 0) return;
+    if (!attributesDirty) return;
     const serialized = JSON.stringify(attributes ?? []);
     const previous = lastAttributesByScreenshotRef.current[selectedImage.id];
     if (previous === undefined) {
@@ -3721,13 +3785,14 @@ export default function DashboardPage() {
         screenshotId: selectedImage.id,
         showToast: false,
       });
+      setAttributesDirty(false);
     }, 500);
     return () => {
       if (attributeSaveTimeoutRef.current) {
         window.clearTimeout(attributeSaveTimeoutRef.current);
       }
     };
-  }, [selectedImage?.id, attributes, bulkTargetIds.length]);
+  }, [selectedImage?.id, attributes, bulkTargetIds.length, attributesDirty]);
 
   // useEffect: Delete/Backspace removes selected annotation (ignored when typing in inputs).
   useEffect(() => {
@@ -4558,13 +4623,13 @@ export default function DashboardPage() {
                 </div>
               ) : (
               <>
-              <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="mb-4 flex items-center gap-2">
                   <input
                     value={viewName}
                     onChange={(e) => setViewName(e.target.value)}
                     placeholder="View name"
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
                   />
 
                   <button
@@ -4586,7 +4651,7 @@ export default function DashboardPage() {
                           rounded-full px-3 py-1 text-sm transition
                           ${activeViewId === view.id
                             ? "bg-gray-900 text-white"
-                            : "bg-gray-100 text-gray-800 hover:bg-gray-200"
+                            : "bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                           }
                         `}
                       >
@@ -4602,17 +4667,17 @@ export default function DashboardPage() {
                               void renameView(view.id, newName);
                             }
                           }}
-                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-gray-900"
+                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                         >
-                          <Pencil className="w-4 h-4" aria-hidden />
+                          <Pencil className="h-4 w-4 text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
                         </button>
 
                         <button
                           type="button"
                           onClick={() => void deleteView(view.id)}
-                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-red-600"
+                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
                         >
-                          <Trash2 className="w-4 h-4" aria-hidden />
+                          <Trash2 className="h-4 w-4 text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
                         </button>
                       </div>
                     </div>
@@ -4624,7 +4689,7 @@ export default function DashboardPage() {
                   value={tagFilter}
                   onChange={(e) => setTagFilter(e.target.value)}
                   placeholder="Filter by tag..."
-                  className="mb-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300"
+                  className="mb-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
                 />
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -4634,16 +4699,16 @@ export default function DashboardPage() {
                       setSelectedKey("");
                       setSearchTerm("");
                     }}
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-200 cursor-pointer dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-700"
                   >
-                    <Plus className="w-4 h-4 mr-2 inline-block" aria-hidden />
+                    <Plus className="mr-2 inline-block h-4 w-4 text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
                     Add Filter
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSelectedIds(filteredScreenshots.map((s) => s.id))}
-                    className="text-sm text-gray-600 hover:text-gray-900"
+                    className="text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
                   >
                     Select All
                   </button>
@@ -4651,7 +4716,7 @@ export default function DashboardPage() {
                   {filters.map((f, index) => (
                     <div
                       key={`${f.key}-${f.value}-${index}`}
-                      className="flex items-center gap-2 rounded-full bg-gray-900 px-3 py-1 text-sm text-white"
+                      className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs px-2 py-1 rounded-md flex items-center gap-2"
                     >
                       <span className="font-medium">
                         {f.key}: {f.value}
@@ -4659,10 +4724,10 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => removeFilter(index)}
-                        className="text-white/70 transition hover:text-white"
+                        className="text-gray-500 dark:text-gray-400 transition hover:text-gray-700 dark:hover:text-gray-200"
                         aria-label="Remove filter"
                       >
-                        <X className="w-4 h-4" aria-hidden />
+                        <X className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
                       </button>
                     </div>
                   ))}
@@ -4674,7 +4739,7 @@ export default function DashboardPage() {
                     onClick={() => setShowFilterMenu(false)}
                   >
                     <div
-                      className="w-full max-w-md cursor-default rounded-xl border border-gray-200 bg-white p-4 shadow-xl animate-dropdown-in transition-all duration-150 ease-in-out"
+                      className="w-full max-w-md cursor-default rounded-xl border border-gray-200 bg-white p-4 shadow-xl animate-dropdown-in transition-all duration-150 ease-in-out dark:border-gray-700 dark:bg-gray-800"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <input
@@ -4684,7 +4749,7 @@ export default function DashboardPage() {
                         }
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder:text-gray-500 outline-none"
+                        className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder:text-gray-500 outline-none dark:border-gray-700 dark:text-gray-100 dark:placeholder:text-gray-500"
                       />
 
                       <div className="mt-2 max-h-60 overflow-y-auto">
@@ -4701,7 +4766,7 @@ export default function DashboardPage() {
                                   setSelectedKey(key);
                                   setSearchTerm("");
                                 }}
-                                className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 transition-all duration-150 ease-in-out hover:bg-gray-100"
+                                className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-100 transition-all duration-150 ease-in-out hover:bg-gray-200 dark:hover:bg-gray-700"
                               >
                                 {key}
                               </div>
@@ -4716,7 +4781,7 @@ export default function DashboardPage() {
                             <div
                               key={value}
                               onClick={() => addFilter(selectedKey, value)}
-                              className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 transition-all duration-150 ease-in-out hover:bg-gray-100"
+                              className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-100 transition-all duration-150 ease-in-out hover:bg-gray-200 dark:hover:bg-gray-700"
                             >
                               {value}
                             </div>
@@ -4881,18 +4946,70 @@ export default function DashboardPage() {
                       </div>
 
                       <div className="flex min-h-[3.5rem] flex-grow flex-col justify-center px-3 py-3">
-                        {shot.tags && shot.tags.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {shot.tags?.map((tag, i) => (
-                              <span
-                                key={`${shot.id}-${tag}-${i}`}
-                                className="rounded-full bg-surface-muted px-2 py-1 text-xs text-foreground"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        {(() => {
+                          const screenshotAttributes = attributesByScreenshot[shot.id] ?? [];
+                          const parsedAnnotation = parseAnnotationValue(
+                            shot.annotations ?? shot.annotation
+                          );
+                          const hasAnnotation =
+                            parsedAnnotation.shapes.length > 0 ||
+                            parsedAnnotation.image.trim().length > 0;
+                          const hasNote = (shot.notes ?? "").trim().length > 0;
+                          const hasVoiceMemo = Boolean(
+                            shot.voice_memo_url ||
+                              shot.voice_memo_path ||
+                              shot.private_voice_memo_url ||
+                              shot.private_voice_memo_path
+                          );
+                          const metadataPills = [
+                            ...(shot.tags ?? []).map((tag) => String(tag)),
+                            ...screenshotAttributes.slice(0, 4).map((attr) => `${attr.key}: ${attr.value}`),
+                          ];
+                          const hasAnyMetaSignal =
+                            metadataPills.length > 0 || hasAnnotation || hasNote || hasVoiceMemo;
+                          if (metadataPills.length === 0) {
+                            if (!hasAnyMetaSignal) {
+                              return (
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  No metadata yet
+                                </p>
+                              );
+                            }
+                          }
+                          return (
+                            <>
+                              <div className="mb-2.5 flex items-center gap-2">
+                                {hasAnnotation && (
+                                  <span title="Has annotation">
+                                    <Pencil className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
+                                  </span>
+                                )}
+                                {hasNote && (
+                                  <span title="Has note">
+                                    <MessageSquare className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
+                                  </span>
+                                )}
+                                {hasVoiceMemo && (
+                                  <span title="Has voice memo">
+                                    <Mic className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
+                                  </span>
+                                )}
+                              </div>
+                              {metadataPills.length > 0 ? (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {metadataPills.map((pill, i) => (
+                                    <span
+                                      key={`${shot.id}-pill-${i}-${pill}`}
+                                      className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs px-2 py-1 rounded-md"
+                                    >
+                                      {pill}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                       </div>
 
                       {selectedIds.length === 0 && (
@@ -5080,11 +5197,13 @@ export default function DashboardPage() {
                   min={1}
                   inputMode="numeric"
                   value={price}
-                  onChange={(e) => setPrice(Number(e.target.value))}
+                  onChange={(e) =>
+                    setPrice(e.target.value.replace(/^0+(?=\d)/, ""))
+                  }
                   placeholder="Enter price (e.g. 29)"
                   className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-gray-300"
                 />
-                {price <= 0 && (
+                {Number(price) <= 0 && (
                   <p className="mt-1 text-xs text-red-600">
                     Price must be greater than 0.
                   </p>
@@ -5105,7 +5224,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={() => void saveShareSettings()}
                 className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={shareSaving || (isPaid && price <= 0)}
+                disabled={shareSaving || (isPaid && Number(price) <= 0)}
               >
                 {shareSaving ? "Saving…" : "Save"}
               </button>
@@ -5662,6 +5781,7 @@ export default function DashboardPage() {
                                   const updated = [...attributes];
                                   updated[index].key = e.target.value;
                                   setAttributes(updated);
+                                  setAttributesDirty(true);
                                 }}
                                 placeholder="Field"
                                 list="dashboard-trade-attr-keys"
@@ -5675,6 +5795,7 @@ export default function DashboardPage() {
                                   const updated = [...attributes];
                                   updated[index].value = e.target.value;
                                   setAttributes(updated);
+                                  setAttributesDirty(true);
                                 }}
                                 placeholder="Value"
                                 list="dashboard-trade-attr-values"
@@ -5698,10 +5819,13 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() =>
-                          setAttributes([
-                            ...attributes,
-                            { id: `tmp-${Date.now()}-${Math.random()}`, key: "", value: "" },
-                          ])
+                          {
+                            setAttributes([
+                              ...attributes,
+                              { id: `tmp-${Date.now()}-${Math.random()}`, key: "", value: "" },
+                            ]);
+                            setAttributesDirty(true);
+                          }
                         }
                         className="mt-3 text-sm text-blue-600 hover:underline"
                       >

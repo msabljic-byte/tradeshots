@@ -482,13 +482,78 @@ export default function PublicPlaybookPage() {
       setLoading(true);
       setError(null);
 
-      const folderQuery = await supabase
+      let folderQuery = await supabase
         .from("folders")
         .select(
-          "id, name, description, owner_email, share_id, is_paid, price"
+          "id, name, description, share_id, is_paid, price"
         )
         .eq("share_id", shareId)
-        .single();
+        .limit(1);
+
+      // Retry with normalized/case-insensitive match if exact match yields no row.
+      if (!folderQuery.error && (!folderQuery.data || folderQuery.data.length === 0)) {
+        const shareIdTrimmed = shareId.trim();
+        const ilikeQuery = await supabase
+          .from("folders")
+          .select("id, name, description, share_id, is_paid, price")
+          .ilike("share_id", shareIdTrimmed)
+          .limit(1);
+        folderQuery = ilikeQuery;
+      }
+
+      // Older schemas may not have paid-pricing columns yet.
+      if (folderQuery.error && isOptionalSchemaMissing(folderQuery.error)) {
+        const legacyQuery = await supabase
+          .from("folders")
+          .select("id, name, description, share_id")
+          .eq("share_id", shareId)
+          .limit(1);
+        if (!legacyQuery.error && (!legacyQuery.data || legacyQuery.data.length === 0)) {
+          const shareIdTrimmed = shareId.trim();
+          const legacyIlike = await supabase
+            .from("folders")
+            .select("id, name, description, share_id")
+            .ilike("share_id", shareIdTrimmed)
+            .limit(1);
+          folderQuery = {
+            data:
+              Array.isArray(legacyIlike.data) && legacyIlike.data.length > 0
+                ? {
+                    ...legacyIlike.data[0],
+                    is_paid: false,
+                    price: 0,
+                  }
+                : null,
+            error: legacyIlike.error,
+            count: null,
+            status: legacyIlike.status,
+            statusText: legacyIlike.statusText,
+          };
+        } else {
+        folderQuery = {
+          data:
+            Array.isArray(legacyQuery.data) && legacyQuery.data.length > 0
+              ? {
+                ...legacyQuery.data[0],
+                is_paid: false,
+                price: 0,
+              }
+              : null,
+          error: legacyQuery.error,
+          count: null,
+          status: legacyQuery.status,
+          statusText: legacyQuery.statusText,
+        };
+        }
+      } else {
+        folderQuery = {
+          ...folderQuery,
+          data:
+            Array.isArray(folderQuery.data) && folderQuery.data.length > 0
+              ? folderQuery.data[0]
+              : null,
+        };
+      }
 
       if (folderQuery.error || !folderQuery.data) {
         const lower = (folderQuery.error?.message ?? "").toLowerCase();
