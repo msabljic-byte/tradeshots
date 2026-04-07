@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotModal from "@/components/ScreenshotModal";
 import { Image as ImageIcon } from "lucide-react";
@@ -824,10 +825,68 @@ export default function PublicPlaybookPage() {
       ? folder.cover_url
       : null) ?? (screenshots[0]?.image_url ?? null);
 
+  function renderPrimaryPreviewCta(extraClassName = "") {
+    if (!currentUserId) {
+      return (
+        <button
+          type="button"
+          onClick={() => redirectToLoginForThisPlaybook()}
+          className={`btn btn-primary transition-transform hover:scale-105 ${extraClassName}`.trim()}
+        >
+          Login to import
+        </button>
+      );
+    }
+    if (isOwned) {
+      return (
+        <button
+          type="button"
+          onClick={() => openOwnedPlaybook()}
+          className={`btn btn-primary transition-transform hover:scale-105 ${extraClassName}`.trim()}
+        >
+          Open Playbook
+        </button>
+      );
+    }
+    if (folder.is_paid) {
+      return (
+        <button
+          type="button"
+          onClick={async () => {
+            await handleBuyWithStripe(currentUserId);
+          }}
+          disabled={checkingOut || verifyingPayment}
+          className={`btn btn-primary transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60 ${extraClassName}`.trim()}
+        >
+          {verifyingPayment
+            ? "Verifying payment…"
+            : checkingOut
+              ? "Redirecting…"
+              : `Buy & Import (€${folder.price ?? 19})`}
+        </button>
+      );
+    }
+    return (
+      <button
+        type="button"
+        disabled={importing}
+        onClick={() => void syncPlaybook()}
+        className={`btn btn-primary transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60 ${extraClassName}`.trim()}
+      >
+        {importing ? "Importing…" : "Import Playbook"}
+      </button>
+    );
+  }
+
   if (!hasAccess || !isUnlocked) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="relative mx-auto max-w-4xl px-6 py-16 text-center">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: "easeOut" }}
+          className="relative mx-auto max-w-4xl space-y-6 px-6 py-16 text-center"
+        >
           <div className="absolute right-6 top-10 text-xs text-gray-400">
             Powered by Tradeshots
           </div>
@@ -835,11 +894,11 @@ export default function PublicPlaybookPage() {
           <h1 className="text-2xl font-bold text-gray-900">{folder.name}</h1>
 
           {coverImageUrl && (
-            <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="group overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
               <img
                 src={coverImageUrl}
                 alt="Playbook cover"
-                className="h-56 w-full object-cover"
+                className="h-56 w-full object-cover transition-transform duration-200 ease-out group-hover:scale-[1.02]"
                 draggable={false}
               />
             </div>
@@ -855,23 +914,40 @@ export default function PublicPlaybookPage() {
           </div>
 
           {screenshots.length > 0 && (
-            <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-3">
-              {screenshots.slice(0, 6).map((s) => (
-                <div key={s.id} className="relative overflow-hidden rounded-lg">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              {screenshots.slice(0, 9).map((s) => (
+                <div key={s.id} className="group relative overflow-hidden rounded-lg">
                   <img
                     src={s.image_url}
                     alt=""
-                    className="h-40 w-full object-cover blur-[2px]"
+                    className={`h-40 w-full rounded-lg object-cover ${
+                      folder.is_paid && !hasAccess && !isOwned ? "blur-sm" : ""
+                    } transition-transform duration-200 ease-out group-hover:scale-[1.03]`}
                     draggable={false}
                   />
-                  <div className="absolute inset-0 bg-black/5" />
+                  {folder.is_paid && !hasAccess && !isOwned ? (
+                    <>
+                      <div className="absolute inset-0 bg-black/20" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="rounded-md bg-black/60 px-2 py-1 text-xs font-medium text-white">
+                          Preview
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="absolute inset-0 bg-black/5" />
+                  )}
                 </div>
               ))}
             </div>
           )}
 
+          {screenshots.length > 0 && (
+            <div className="flex justify-center">{renderPrimaryPreviewCta()}</div>
+          )}
+
           {folder.is_paid && !hasAccess && !isOwned ? (
-            <div className="mt-10 flex flex-col items-center gap-3 text-center">
+            <div className="flex flex-col items-center gap-3 text-center">
               <div className="text-sm text-gray-600">Price</div>
               <div className="text-3xl font-bold text-gray-900">
                 €{folder.price ?? 19}
@@ -886,7 +962,7 @@ export default function PublicPlaybookPage() {
                   await handleBuyWithStripe(currentUserId);
                 }}
                 disabled={checkingOut || verifyingPayment}
-                className="btn btn-primary mt-2 disabled:cursor-not-allowed disabled:opacity-60"
+                className="btn btn-primary mt-2 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {verifyingPayment
                   ? "Verifying payment…"
@@ -896,48 +972,8 @@ export default function PublicPlaybookPage() {
               </button>
             </div>
           ) : (
-            <div className="mt-10 flex flex-col items-center gap-3">
-              {!currentUserId ? (
-                <button
-                  type="button"
-                  onClick={() => redirectToLoginForThisPlaybook()}
-                  className="btn btn-primary"
-                >
-                  Login to import
-                </button>
-              ) : isOwned ? (
-                <button
-                  type="button"
-                  onClick={() => openOwnedPlaybook()}
-                  className="btn btn-primary"
-                >
-                  Open Playbook
-                </button>
-              ) : folder.is_paid ? (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await handleBuyWithStripe(currentUserId);
-                  }}
-                  disabled={checkingOut || verifyingPayment}
-                  className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {verifyingPayment
-                    ? "Verifying payment…"
-                    : checkingOut
-                      ? "Redirecting…"
-                      : `Buy & Import (€${folder.price ?? 19})`}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={importing}
-                  onClick={() => void syncPlaybook()}
-                  className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {importing ? "Importing…" : "Import Playbook"}
-                </button>
-              )}
+            <div className="flex flex-col items-center gap-3">
+              {renderPrimaryPreviewCta()}
               <button
                 type="button"
                 onClick={() => setIsUnlocked(true)}
@@ -947,7 +983,7 @@ export default function PublicPlaybookPage() {
               </button>
             </div>
           )}
-        </div>
+        </motion.div>
 
         {toast && (
           <div

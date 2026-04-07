@@ -5,7 +5,6 @@
  * Lists public playbooks, search, filters, sort.
  */
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import Link from "next/link";
 import { Search } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import SkeletonCard from "@/components/marketplace/SkeletonCard";
@@ -30,7 +29,13 @@ type MarketplaceFolder = {
 type PriceFilter = "all" | "free" | "paid";
 type SortMode = "newest" | "price-asc" | "price-desc";
 
-export default function MarketplaceView() {
+export type MarketplacePlaybook = MarketplaceFolder;
+
+export default function MarketplaceView({
+  onOpenPlaybook,
+}: {
+  onOpenPlaybook?: (playbook: MarketplacePlaybook) => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -438,9 +443,10 @@ export default function MarketplaceView() {
           {filtered.map((folder) => {
             const cover = folder.cover_url || fallbackCovers[String(folder.id)] || "";
             return (
-              <Link
+              <button
                 key={folder.id}
-                href={`/playbook/${encodeURIComponent(String(folder.share_id ?? ""))}`}
+                type="button"
+                onClick={() => onOpenPlaybook?.(folder)}
                 className="group overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-[transform,box-shadow] duration-200 ease-out hover:scale-105 hover:shadow-lg dark:border-gray-700 dark:bg-gray-900"
               >
                 <div className="relative h-40 w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
@@ -460,7 +466,7 @@ export default function MarketplaceView() {
                     {folder.name}
                   </p>
                 </div>
-              </Link>
+              </button>
             );
           })}
         </div>

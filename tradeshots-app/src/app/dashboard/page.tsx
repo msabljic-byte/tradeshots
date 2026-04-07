@@ -29,7 +29,12 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import MarketplaceView from "@/components/marketplace/MarketplaceView";
+import MarketplaceView, {
+  type MarketplacePlaybook,
+} from "@/components/marketplace/MarketplaceView";
+import PlaybookPreviewView, {
+  type SelectedPlaybook,
+} from "@/components/playbook/PlaybookPreviewView";
 import { supabase } from "@/lib/supabaseClient";
 import {
   syncSharedPlaybookAndNotifyImporters,
@@ -353,21 +358,43 @@ function DashboardPageContent() {
   const searchParams = useSearchParams();
   const requestedFolderId = searchParams.get("folderId");
   const requestedOpenFirstShot = searchParams.get("openFirstShot") === "1";
-  const [activeView, setActiveView] = useState<"dashboard" | "marketplace">(() =>
-    searchParams.get("view") === "marketplace" ? "marketplace" : "dashboard"
+  const [activeView, setActiveView] = useState<"dashboard" | "marketplace" | "playbook">(() =>
+    searchParams.get("view") === "marketplace"
+      ? "marketplace"
+      : searchParams.get("view") === "playbook"
+      ? "playbook"
+      : "dashboard"
   );
+  const [selectedPlaybook, setSelectedPlaybook] = useState<SelectedPlaybook | null>(null);
 
   const navigateDashboardView = useCallback(
-    (next: "dashboard" | "marketplace") => {
+    (next: "dashboard" | "marketplace" | "playbook") => {
       setActiveView(next);
       const params = new URLSearchParams(searchParams.toString());
       if (next === "marketplace") {
         params.set("view", "marketplace");
+        params.delete("playbook");
+      } else if (next === "playbook") {
+        params.set("view", "playbook");
       } else {
         params.delete("view");
+        params.delete("playbook");
       }
       const qs = params.toString();
       router.replace(qs ? `/dashboard?${qs}` : `/dashboard`);
+    },
+    [router, searchParams]
+  );
+  const openPlaybookPreview = useCallback(
+    (playbook: MarketplacePlaybook) => {
+      setSelectedPlaybook(playbook);
+      setActiveView("playbook");
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("view", "playbook");
+      const sid = String(playbook?.share_id ?? "").trim();
+      if (sid) params.set("playbook", sid);
+      const qs = params.toString();
+      router.replace(qs ? `/dashboard?${qs}` : "/dashboard?view=playbook");
     },
     [router, searchParams]
   );
@@ -1719,7 +1746,19 @@ function DashboardPageContent() {
   // useEffect: keep layout view in sync with `?view=` when URL changes (back/forward, external links).
   useEffect(() => {
     const v = searchParams.get("view");
-    setActiveView(v === "marketplace" ? "marketplace" : "dashboard");
+    if (v === "marketplace") {
+      setActiveView("marketplace");
+      return;
+    }
+    if (v === "playbook") {
+      const sid = String(searchParams.get("playbook") ?? "").trim();
+      if (sid && !selectedPlaybook) {
+        setSelectedPlaybook({ share_id: sid, name: "Playbook Preview" });
+      }
+      setActiveView("playbook");
+      return;
+    }
+    setActiveView("dashboard");
   }, [searchParams]);
 
   // useEffect: visibility — refetch when user returns to the tab (sync importer rows without full reload).
@@ -5139,7 +5178,21 @@ function DashboardPageContent() {
                   exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
                   transition={{ duration: 0.22, ease: "easeOut" }}
                 >
-                  <MarketplaceView />
+                  <MarketplaceView onOpenPlaybook={openPlaybookPreview} />
+                </motion.div>
+              ) : activeView === "playbook" ? (
+                <motion.div
+                  key={activeView}
+                  className="w-full"
+                  initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                >
+                  <PlaybookPreviewView
+                    playbook={selectedPlaybook}
+                    onBack={() => navigateDashboardView("marketplace")}
+                  />
                 </motion.div>
               ) : loading ? (
                 <motion.div
