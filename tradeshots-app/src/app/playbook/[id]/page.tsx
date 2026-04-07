@@ -13,7 +13,6 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotModal from "@/components/ScreenshotModal";
 import { Image as ImageIcon } from "lucide-react";
-import { loadStripe } from "@stripe/stripe-js";
 
 type ScreenshotRow = {
   id: string;
@@ -36,9 +35,6 @@ type ScreenshotRow = {
 };
 
 const LOCAL_ANNOTATIONS_KEY = "tradeshots.localAnnotations.v1";
-const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
-  : null;
 
 function readLocalAnnotations(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -112,6 +108,9 @@ export default function PublicPlaybookPage() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isOwned, setIsOwned] = useState(false);
+  const [ownedCopyFolderId, setOwnedCopyFolderId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const [verifyingPayment, setVerifyingPayment] = useState(false);
@@ -119,6 +118,7 @@ export default function PublicPlaybookPage() {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
   const toastExitTimeoutRef = useRef<number | null>(null);
+  const autoImportRanRef = useRef(false);
 
   function showToast(message: string) {
     setToast(message);
@@ -150,44 +150,65 @@ export default function PublicPlaybookPage() {
     router.push(`/login?next=${encodeURIComponent(nextPath)}`);
   }
 
-  async function createCheckoutSession(userId: string): Promise<string | null> {
+  async function createCheckoutSession(
+    userId: string
+  ): Promise<{ sessionId: string; url: string | null } | null> {
     if (!shareId) return null;
 
-    const res = await fetch("/api/create-checkout-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playbookId: shareId, userId }),
-    });
+    try {
+      const res = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playbookId: shareId, userId }),
+      });
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      showToast(data?.error ?? "Failed to start checkout.");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("Checkout session request failed:", {
+          status: res.status,
+          body: data,
+        });
+        showToast(data?.error ?? "Failed to start checkout.");
+        return null;
+      }
+
+      const sessionId = data?.sessionId;
+      const checkoutUrl =
+        typeof data?.url === "string" && data.url.length > 0 ? data.url : null;
+      if (!sessionId) {
+        console.error("No session ID returned from checkout API:", data);
+        showToast("Could not create checkout session.");
+        return null;
+      }
+
+      return {
+        sessionId: String(sessionId),
+        url: checkoutUrl,
+      };
+    } catch (err) {
+      console.error("Checkout session network error:", err);
+      showToast("Could not contact checkout service.");
       return null;
     }
-
-    const sessionId = data?.sessionId;
-    if (!sessionId) {
-      showToast("Could not create checkout session.");
-      return null;
-    }
-
-    return String(sessionId);
   }
 
   async function handleBuyWithStripe(userId: string) {
     setCheckingOut(true);
     try {
-      const stripe = stripePromise ? await stripePromise : null;
-      if (!stripe) {
-        showToast("Stripe is not configured.");
+      const checkout = await createCheckoutSession(userId);
+      if (!checkout) return;
+
+      // Stripe.js removed redirectToCheckout; use the hosted checkout URL directly.
+      if (checkout.url) {
+        window.location.assign(checkout.url);
         return;
       }
 
-      const sessionId = await createCheckoutSession(userId);
-      if (!sessionId) return;
-
-      const { error } = await (stripe as any).redirectToCheckout({ sessionId });
-      if (error) showToast(error.message);
+      console.error("Checkout API did not return a checkout URL:", checkout);
+      showToast("Checkout URL missing. Please try again.");
+    } catch (err) {
+      console.error("Stripe checkout flow failed:", err);
+      showToast("Checkout failed. Please try again.");
     } finally {
       setCheckingOut(false);
     }
@@ -205,10 +226,85 @@ export default function PublicPlaybookPage() {
     };
   }, []);
 
-  async function syncPlaybook() {
+  // useEffect: determine auth + ownership of this shared playbook for CTA logic.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadOwnership() {
+      if (!folder?.id) {
+        if (!cancelled) {
+          setCurrentUserId(null);
+          setIsOwned(false);
+          setOwnedCopyFolderId(null);
+        }
+        return;
+      }
+
+      const { data: auth } = await supabase.auth.getUser();
+      const user = auth.user;
+      if (!user) {
+        if (!cancelled) {
+          setCurrentUserId(null);
+          setIsOwned(false);
+          setOwnedCopyFolderId(null);
+        }
+        return;
+      }
+
+      if (!cancelled) setCurrentUserId(user.id);
+
+      const ownershipQuery = await supabase
+        .from("user_playbooks")
+        .select("copy_folder_id")
+        .eq("user_id", user.id)
+        .eq("source_folder_id", String(folder.id))
+        .limit(1);
+
+      if (ownershipQuery.error) {
+        if (!isOptionalSchemaMissing(ownershipQuery.error)) {
+          console.warn("user_playbooks ownership check:", ownershipQuery.error.message);
+        }
+        if (!cancelled) {
+          setIsOwned(false);
+          setOwnedCopyFolderId(null);
+        }
+        return;
+      }
+
+      const row =
+        Array.isArray(ownershipQuery.data) && ownershipQuery.data.length > 0
+          ? ownershipQuery.data[0]
+          : null;
+      if (!cancelled) {
+        setIsOwned(Boolean(row));
+        setOwnedCopyFolderId(
+          row?.copy_folder_id != null ? String(row.copy_folder_id) : null
+        );
+      }
+    }
+    void loadOwnership();
+    return () => {
+      cancelled = true;
+    };
+  }, [folder?.id]);
+
+  function openOwnedPlaybook() {
+    if (ownedCopyFolderId) {
+      router.push(
+        `/dashboard?folderId=${encodeURIComponent(ownedCopyFolderId)}&openFirstShot=1`
+      );
+      return;
+    }
+    router.push("/dashboard");
+  }
+
+  async function syncPlaybook(options?: {
+    skipPaidCheck?: boolean;
+    successToast?: string;
+    skipRedirect?: boolean;
+  }) {
     if (!folder) return;
 
-    if (folder.is_paid && !hasAccess) {
+    if (!options?.skipPaidCheck && folder.is_paid && !hasAccess) {
       showToast("Please purchase first");
       return;
     }
@@ -240,7 +336,9 @@ export default function PublicPlaybookPage() {
 
       if (existingImports && existingImports.length > 0) {
         showToast("You already imported this playbook.");
-        router.push("/dashboard");
+        if (!options?.skipRedirect) {
+          router.push("/dashboard");
+        }
         return;
       }
 
@@ -265,29 +363,57 @@ export default function PublicPlaybookPage() {
         existingNames
       );
 
-      const { data: newFolder, error: folderError } = await supabase
-        .from("folders")
-        .insert({
-          name: importName,
-          description: folder.description ?? null,
-          user_id: userId,
-          share_id: null,
-          parent_id: null,
-        })
-        .select()
-        .single();
-
-      if (folderError || !newFolder) {
-        showToast(folderError?.message ?? "Could not create folder");
-        return;
+      let newFolder: (Record<string, unknown> & { id: string }) | null = null;
+      let folderError: { message?: string } | null = null;
+      {
+        const inserted = await supabase
+          .from("folders")
+          .insert({
+            name: importName,
+            description: folder.description ?? null,
+            user_id: userId,
+            share_id: null,
+            parent_id: null,
+            is_imported: true,
+          })
+          .select()
+          .single();
+        newFolder =
+          (inserted.data as (Record<string, unknown> & { id: string }) | null) ??
+          null;
+        folderError = inserted.error;
       }
 
-      const { error: importedFlagErr } = await supabase
-        .from("folders")
-        .update({ is_imported: true })
-        .eq("id", newFolder.id);
-      if (importedFlagErr && !isOptionalSchemaMissing(importedFlagErr)) {
-        console.warn("folders.is_imported:", importedFlagErr.message);
+      if (folderError && isOptionalSchemaMissing(folderError)) {
+        // Older schema fallback: retry without `is_imported` column.
+        const retry = await supabase
+          .from("folders")
+          .insert({
+            name: importName,
+            description: folder.description ?? null,
+            user_id: userId,
+            share_id: null,
+            parent_id: null,
+          })
+          .select()
+          .single();
+        if (retry.error || !retry.data) {
+          showToast(retry.error?.message ?? "Could not create folder");
+          return;
+        }
+        const { error: importedFlagErr } = await supabase
+          .from("folders")
+          .update({ is_imported: true })
+          .eq("id", retry.data.id);
+        if (importedFlagErr && !isOptionalSchemaMissing(importedFlagErr)) {
+          console.warn("folders.is_imported:", importedFlagErr.message);
+        }
+        // Continue using retried folder row.
+        newFolder =
+          (retry.data as (Record<string, unknown> & { id: string }) | null) ?? null;
+      } else if (folderError || !newFolder) {
+        showToast(folderError?.message ?? "Could not create folder");
+        return;
       }
 
       const { error: linkErr } = await supabase.from("user_playbooks").insert({
@@ -395,20 +521,23 @@ export default function PublicPlaybookPage() {
         console.warn("notifications insert:", notifErr.message);
       }
 
-      showToast("Playbook imported");
-      router.push("/dashboard");
+      showToast(options?.successToast ?? "Playbook imported");
+      if (!options?.skipRedirect) {
+        router.push("/dashboard");
+      }
     } finally {
       setImporting(false);
     }
   }
 
-  // useEffect: paid playbooks — grant access from Stripe return (`?success=true&session_id=`) via verify API; free playbooks get access immediately.
+  // useEffect: paid playbooks — grant access from Stripe return (`?success=true&session_id=`), auto-import once, then clean URL.
   useEffect(() => {
     if (!folder) return;
-    const successParam =
+    const params =
       typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("success")
+        ? new URLSearchParams(window.location.search)
         : null;
+    const successParam = params?.get("success");
 
     if (!folder.is_paid) {
       setHasAccess(true);
@@ -457,7 +586,47 @@ export default function PublicPlaybookPage() {
         const data = await res.json().catch(() => ({}));
         if (res.ok && data?.authorized) {
           setHasAccess(true);
-          showToast("Payment confirmed. You can import now.");
+          // Best-effort purchase record (schema may not include this table in all envs).
+          const existingPurchase = await supabase
+            .from("purchases")
+            .select("id")
+            .eq("user_id", auth.user.id)
+            .eq("source_folder_id", String(folder.id))
+            .limit(1);
+
+          if (
+            !existingPurchase.error &&
+            (!existingPurchase.data || existingPurchase.data.length === 0)
+          ) {
+            const purchaseInsert = await supabase.from("purchases").insert({
+              user_id: auth.user.id,
+              source_folder_id: String(folder.id),
+              price: Number(folder.price ?? 0),
+            });
+            if (purchaseInsert.error && !isOptionalSchemaMissing(purchaseInsert.error)) {
+              console.warn("purchases insert:", purchaseInsert.error.message);
+            }
+          } else if (
+            existingPurchase.error &&
+            !isOptionalSchemaMissing(existingPurchase.error)
+          ) {
+            console.warn("purchases lookup:", existingPurchase.error.message);
+          }
+
+          if (!autoImportRanRef.current) {
+            autoImportRanRef.current = true;
+            await syncPlaybook({
+              skipPaidCheck: true,
+              successToast: "Playbook purchased and added",
+              skipRedirect: true,
+            });
+            if (typeof window !== "undefined") {
+              window.history.replaceState({}, "", window.location.pathname);
+            }
+            window.setTimeout(() => {
+              router.push("/dashboard");
+            }, 1500);
+          }
         } else {
           setHasAccess(false);
           showToast(data?.error ?? "Payment could not be verified.");
@@ -468,7 +637,7 @@ export default function PublicPlaybookPage() {
     }
 
     void verifyPayment();
-  }, [folder]);
+  }, [folder, router]);
 
   // useEffect: load shared folder + screenshots + trade_attributes by `share_id` (runs when `shareId` from route changes).
   useEffect(() => {
@@ -657,7 +826,7 @@ export default function PublicPlaybookPage() {
             </div>
           )}
 
-          {folder.is_paid && !hasAccess ? (
+          {folder.is_paid && !hasAccess && !isOwned ? (
             <div className="mt-10 flex flex-col items-center gap-3 text-center">
               <div className="text-sm text-gray-600">Price</div>
               <div className="text-3xl font-bold text-gray-900">
@@ -666,12 +835,11 @@ export default function PublicPlaybookPage() {
               <button
                 type="button"
                 onClick={async () => {
-                  const { data: auth } = await supabase.auth.getUser();
-                  if (!auth.user) {
+                  if (!currentUserId) {
                     redirectToLoginForThisPlaybook();
                     return;
                   }
-                  await handleBuyWithStripe(auth.user.id);
+                  await handleBuyWithStripe(currentUserId);
                 }}
                 disabled={checkingOut || verifyingPayment}
                 className="btn btn-primary mt-2 disabled:cursor-not-allowed disabled:opacity-60"
@@ -685,14 +853,47 @@ export default function PublicPlaybookPage() {
             </div>
           ) : (
             <div className="mt-10 flex flex-col items-center gap-3">
-              <button
-                type="button"
-                disabled={importing}
-                onClick={() => void syncPlaybook()}
-                className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {importing ? "Importing…" : "Import Playbook"}
-              </button>
+              {!currentUserId ? (
+                <button
+                  type="button"
+                  onClick={() => redirectToLoginForThisPlaybook()}
+                  className="btn btn-primary"
+                >
+                  Login to import
+                </button>
+              ) : isOwned ? (
+                <button
+                  type="button"
+                  onClick={() => openOwnedPlaybook()}
+                  className="btn btn-primary"
+                >
+                  Open Playbook
+                </button>
+              ) : folder.is_paid ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleBuyWithStripe(currentUserId);
+                  }}
+                  disabled={checkingOut || verifyingPayment}
+                  className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {verifyingPayment
+                    ? "Verifying payment…"
+                    : checkingOut
+                      ? "Redirecting…"
+                      : `Buy & Import (€${folder.price ?? 19})`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => void syncPlaybook()}
+                  className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {importing ? "Importing…" : "Import Playbook"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setIsUnlocked(true)}

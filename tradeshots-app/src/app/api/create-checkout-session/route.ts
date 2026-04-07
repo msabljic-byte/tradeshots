@@ -11,6 +11,7 @@ export async function POST(req: Request) {
   try {
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
     if (!stripeSecretKey) {
+      console.error("Stripe error: Missing STRIPE_SECRET_KEY.");
       return NextResponse.json(
         { error: "Missing STRIPE_SECRET_KEY." },
         { status: 500 }
@@ -37,6 +38,10 @@ export async function POST(req: Request) {
       .single();
 
     if (folderErr || !folder) {
+      console.error("Stripe error: playbook lookup failed", {
+        playbookShareId,
+        error: folderErr?.message,
+      });
       return NextResponse.json(
         { error: folderErr?.message ?? "Playbook not found." },
         { status: 404 }
@@ -46,6 +51,10 @@ export async function POST(req: Request) {
     const unitAmountCents = Math.round((folder.price ?? 19) * 100);
 
     if (!Number.isFinite(unitAmountCents) || unitAmountCents <= 0) {
+      console.error("Stripe error: invalid playbook price", {
+        playbookShareId,
+        price: folder.price,
+      });
       return NextResponse.json(
         { error: "Invalid playbook price." },
         { status: 400 }
@@ -82,8 +91,9 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({ sessionId: session.id });
+    return NextResponse.json({ sessionId: session.id, url: session.url });
   } catch (err: any) {
+    console.error("Stripe error:", err);
     return NextResponse.json(
       { error: err?.message ?? "Failed to create checkout session." },
       { status: 500 }

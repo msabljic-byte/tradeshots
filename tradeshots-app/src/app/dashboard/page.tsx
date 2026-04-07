@@ -25,7 +25,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import {
   syncSharedPlaybookAndNotifyImporters,
@@ -342,6 +342,9 @@ function getNotificationIcon(
  */
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedFolderId = searchParams.get("folderId");
+  const requestedOpenFirstShot = searchParams.get("openFirstShot") === "1";
   const [email, setEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
@@ -402,6 +405,8 @@ export default function DashboardPage() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const skipSidebarPersistRef = useRef(true);
   const prevActiveFolderIdRef = useRef<string | null>(null);
+  const didAutoOpenFirstShotRef = useRef(false);
+  const didApplyRequestedFolderRef = useRef(false);
   const screenshotsGridRef = useRef<HTMLDivElement | null>(null);
 
   const [currentNote, setCurrentNote] = useState("");
@@ -960,6 +965,10 @@ export default function DashboardPage() {
   }
 
   function openShareModal(folder: any) {
+    if (folder?.is_imported) {
+      showToast("Imported playbooks cannot be shared.");
+      return;
+    }
     setShareModalFolder(folder);
     setIsPaid(Boolean(folder?.is_paid));
     const nextPrice = Number(folder?.price ?? 0);
@@ -974,6 +983,10 @@ export default function DashboardPage() {
   }
 
   async function makePublic(folder: any, nextIsPaid: boolean, nextPrice: number): Promise<boolean> {
+    if (folder?.is_imported) {
+      showToast("Imported playbooks cannot be shared.");
+      return false;
+    }
     const finalPrice = nextIsPaid ? nextPrice : 0;
     let shareId = String(folder?.share_id ?? "");
 
@@ -1243,6 +1256,41 @@ export default function DashboardPage() {
 
     void run();
   }, [activeFolderId, checkingSession]);
+
+  // useEffect: deep-link open specific folder from `?folderId=` once folders are loaded.
+  useEffect(() => {
+    if (checkingSession) return;
+    if (!requestedFolderId) return;
+    if (didApplyRequestedFolderRef.current) return;
+    const target = folders.find((f: any) => String(f.id) === String(requestedFolderId));
+    if (!target) return;
+
+    didApplyRequestedFolderRef.current = true;
+
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      const byId = new Map(
+        (folders ?? []).map((f: any) => [String(f.id), f])
+      );
+      let cur: string | null = String(requestedFolderId);
+      for (let guard = 0; guard < 48 && cur; guard++) {
+        const f = byId.get(cur);
+        if (!f?.parent_id) break;
+        const pid = String(f.parent_id);
+        next.add(pid);
+        cur = pid;
+      }
+      return next;
+    });
+
+    setActiveFolderId(String(requestedFolderId));
+    window.setTimeout(() => {
+      const el = document.querySelector(
+        `[data-folder-id="${String(requestedFolderId)}"]`
+      ) as HTMLElement | null;
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+  }, [checkingSession, requestedFolderId, folders]);
 
   // useEffect: visibility — refetch when user returns to the tab (sync importer rows without full reload).
   useEffect(() => {
@@ -2446,6 +2494,35 @@ export default function DashboardPage() {
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "?";
 
+  // useEffect: optional deep-link polish — auto-open first screenshot for selected deep-linked folder.
+  useEffect(() => {
+    if (!requestedOpenFirstShot) return;
+    if (!requestedFolderId) return;
+    if (didAutoOpenFirstShotRef.current) return;
+    if (activeFolderId == null) return;
+    if (String(activeFolderId) !== String(requestedFolderId)) return;
+    if (selectedIndex !== null) return;
+    if (filteredScreenshots.length === 0) return;
+
+    didAutoOpenFirstShotRef.current = true;
+    setSelectedIndex(0);
+
+    // Clean one-time query param so refresh doesn't keep reopening the modal.
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      params.delete("openFirstShot");
+      const next = params.toString();
+      const url = next ? `${window.location.pathname}?${next}` : window.location.pathname;
+      window.history.replaceState({}, "", url);
+    }
+  }, [
+    requestedOpenFirstShot,
+    requestedFolderId,
+    activeFolderId,
+    selectedIndex,
+    filteredScreenshots.length,
+  ]);
+
   // --- Bulk selection: apply attributes to many screenshots or delete in one shot ---
   async function openBulkModal() {
     const ids = selectedIds.filter(Boolean).map((id) => String(id));
@@ -3326,6 +3403,7 @@ export default function DashboardPage() {
         return (
           <div key={folder.id}>
             <div
+              data-folder-id={String(folder.id)}
               className={`
                 group flex min-w-0 cursor-pointer items-center gap-2 rounded-lg px-3 py-2
                 transition-all duration-150 ease-in-out select-none
@@ -3426,8 +3504,9 @@ export default function DashboardPage() {
               </span>
 
               <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
-                {folder.share_id ? (
-                  <>
+                {!folder.is_imported ? (
+                  folder.share_id ? (
+                    <>
                     <button
                       type="button"
                       onClick={(e) => {
@@ -3466,20 +3545,21 @@ export default function DashboardPage() {
                     >
                       <CreditCard className="w-4 h-4" aria-hidden />
                     </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
+                    </>
+                  ) : (
+                    <button
+                      type="button"
                       onClick={(e) => {
-                      e.stopPropagation();
+                        e.stopPropagation();
                         openShareModal(folder);
-                    }}
-                    className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
-                    title="Make public"
-                  >
-                    <Globe className="w-4 h-4" aria-hidden />
-                  </button>
-                )}
+                      }}
+                      className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                      title="Make public"
+                    >
+                      <Globe className="w-4 h-4" aria-hidden />
+                    </button>
+                  )
+                ) : null}
 
                 <button
                   type="button"
