@@ -416,10 +416,16 @@ export default function PublicPlaybookPage() {
         return;
       }
 
+      if (!newFolder) {
+        showToast("Could not create folder");
+        return;
+      }
+      const copyFolderId = newFolder.id;
+
       const { error: linkErr } = await supabase.from("user_playbooks").insert({
         user_id: userId,
         source_folder_id: sourceFolderId,
-        copy_folder_id: newFolder.id,
+        copy_folder_id: copyFolderId,
       });
 
       if (linkErr) {
@@ -427,7 +433,7 @@ export default function PublicPlaybookPage() {
           linkErr.message ??
             "Could not link import (add user_playbooks.copy_folder_id in Supabase). Import cancelled."
         );
-        await supabase.from("folders").delete().eq("id", newFolder.id);
+        await supabase.from("folders").delete().eq("id", copyFolderId);
         return;
       }
 
@@ -447,7 +453,7 @@ export default function PublicPlaybookPage() {
         const sourceShotId = String(s.id);
 
         const insertPayload: Record<string, unknown> = {
-          folder_id: newFolder.id,
+          folder_id: copyFolderId,
           user_id: userId,
           image_url: s.image_url,
           notes: s.notes ?? null,
@@ -681,7 +687,7 @@ export default function PublicPlaybookPage() {
           .select("id, name, description, share_id, is_paid, price")
           .eq("share_id", shareId)
           .limit(1);
-        folderQuery = retry;
+        folderQuery = retry as typeof folderQuery;
       }
 
       // Older schemas may not have paid-pricing columns yet.
@@ -711,7 +717,7 @@ export default function PublicPlaybookPage() {
             count: null,
             status: legacyIlike.status,
             statusText: legacyIlike.statusText,
-          };
+          } as typeof folderQuery;
         } else {
         folderQuery = {
           data:
@@ -726,7 +732,7 @@ export default function PublicPlaybookPage() {
           count: null,
           status: legacyQuery.status,
           statusText: legacyQuery.statusText,
-        };
+        } as typeof folderQuery;
         }
       } else {
         folderQuery = {
@@ -735,10 +741,18 @@ export default function PublicPlaybookPage() {
             Array.isArray(folderQuery.data) && folderQuery.data.length > 0
               ? folderQuery.data[0]
               : null,
-        };
+        } as typeof folderQuery;
       }
 
-      if (folderQuery.error || !folderQuery.data) {
+      const rawFolderData = folderQuery.data;
+      const folderRow =
+        rawFolderData == null
+          ? null
+          : Array.isArray(rawFolderData)
+            ? rawFolderData[0] ?? null
+            : rawFolderData;
+
+      if (folderQuery.error || !folderRow) {
         const lower = (folderQuery.error?.message ?? "").toLowerCase();
         setError(
           lower.includes("share_id")
@@ -751,12 +765,12 @@ export default function PublicPlaybookPage() {
         return;
       }
 
-      setFolder(folderQuery.data);
+      setFolder(folderRow);
 
       const shotsQuery = await supabase
         .from("screenshots")
         .select("*")
-        .eq("folder_id", folderQuery.data.id)
+        .eq("folder_id", folderRow.id)
         .order("created_at", { ascending: false });
 
       const shots = (shotsQuery.data ?? []) as ScreenshotRow[];

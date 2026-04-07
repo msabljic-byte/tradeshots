@@ -18,14 +18,18 @@
  * Navigation: every `useEffect` is preceded by a short `// useEffect:` line (what it does and key deps).
  */
 import {
+  Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
+import MarketplaceView from "@/components/marketplace/MarketplaceView";
 import { supabase } from "@/lib/supabaseClient";
 import {
   syncSharedPlaybookAndNotifyImporters,
@@ -65,6 +69,7 @@ import {
   Sun,
   Sparkles,
   MessageSquare,
+  Star,
   Trash2,
   Upload,
   X,
@@ -83,6 +88,7 @@ import {
   Redo2,
   PanelRightClose,
   PanelRightOpen,
+  Compass,
 } from "lucide-react";
 
 /** Row shape for `screenshots` + UI-only fields. */
@@ -112,6 +118,8 @@ type ScreenshotRow = {
   is_new?: boolean | null;
   /** True after notes, annotations, or attributes change (visible to importers after sync). */
   is_updated?: boolean | null;
+  /** User bookmark flag for quick re-access in dashboard grid. */
+  is_favorite?: boolean | null;
 };
 
 type NotificationRow = {
@@ -340,11 +348,29 @@ function getNotificationIcon(
  * Single-page dashboard: sidebar (folders, profile, notifications), main grid, screenshot modal/editor.
  * All handlers close over Supabase; prefer `fetchScreenshots` / `fetchFolders` after mutations.
  */
-export default function DashboardPage() {
+function DashboardPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedFolderId = searchParams.get("folderId");
   const requestedOpenFirstShot = searchParams.get("openFirstShot") === "1";
+  const [activeView, setActiveView] = useState<"dashboard" | "marketplace">(() =>
+    searchParams.get("view") === "marketplace" ? "marketplace" : "dashboard"
+  );
+
+  const navigateDashboardView = useCallback(
+    (next: "dashboard" | "marketplace") => {
+      setActiveView(next);
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "marketplace") {
+        params.set("view", "marketplace");
+      } else {
+        params.delete("view");
+      }
+      const qs = params.toString();
+      router.replace(qs ? `/dashboard?${qs}` : `/dashboard`);
+    },
+    [router, searchParams]
+  );
   const [email, setEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
@@ -353,6 +379,7 @@ export default function DashboardPage() {
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [allScreenshots, setAllScreenshots] = useState<any[]>([]);
   const [tagFilter, setTagFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [allAttributes, setAllAttributes] = useState<any[]>([]);
   const [attributeKeyValuesByScreenshot, setAttributeKeyValuesByScreenshot] = useState<
     Record<string, Record<string, string[]>>
@@ -363,6 +390,12 @@ export default function DashboardPage() {
       value: string;
     }>
   >([]);
+  const [quickFilters, setQuickFilters] = useState({
+    voice: false,
+    annotations: false,
+    notes: false,
+    favorites: false,
+  });
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
@@ -380,6 +413,22 @@ export default function DashboardPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
+  /** Drives Framer exit; `selectedIndex` clears in onExitComplete after animation. */
+  const [modalPresentationOpen, setModalPresentationOpen] = useState(false);
+
+  const requestCloseScreenshotModal = useCallback(() => {
+    setModalPresentationOpen(false);
+  }, []);
+
+  const handleScreenshotModalExitComplete = useCallback(() => {
+    setSelectedIndex(null);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (selectedIndex !== null) {
+      setModalPresentationOpen(true);
+    }
+  }, [selectedIndex]);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isAnnotationToolbarOpen, setIsAnnotationToolbarOpen] = useState(true);
   const [showStrokeSizePopover, setShowStrokeSizePopover] = useState(false);
@@ -403,6 +452,10 @@ export default function DashboardPage() {
   const [shareSaving, setShareSaving] = useState(false);
   const [shareCoverUrl, setShareCoverUrl] = useState<string | null>(null);
   const [shareCoverUploading, setShareCoverUploading] = useState(false);
+  const [shareAssetTypes, setShareAssetTypes] = useState<string[]>([]);
+  const [shareTimeframe, setShareTimeframe] = useState("");
+  const [shareStrategyTypes, setShareStrategyTypes] = useState<string[]>([]);
+  const [shareExperienceLevel, setShareExperienceLevel] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const skipSidebarPersistRef = useRef(true);
@@ -635,6 +688,7 @@ export default function DashboardPage() {
       return next;
     });
 
+    navigateDashboardView("dashboard");
     setActiveFolderId(String(copyId));
     setNotificationsOpen(false);
 
@@ -676,6 +730,39 @@ export default function DashboardPage() {
     setFilters((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function applyDashboardScreenshotFilters(rows: ScreenshotRow[]): ScreenshotRow[] {
+    const tagFilterLower = tagFilter.trim().toLowerCase();
+    const notesSearchLower = searchQuery.trim().toLowerCase();
+    return rows.filter((s) => {
+      const matchesTag =
+        !tagFilterLower ||
+        s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+      const matchesNotes =
+        !notesSearchLower ||
+        String(s.notes ?? "").toLowerCase().includes(notesSearchLower);
+      const parsedAnnotation = parseAnnotationValue(s.annotations ?? s.annotation);
+      const hasAnnotations =
+        parsedAnnotation.shapes.length > 0 || parsedAnnotation.image.trim().length > 0;
+      const hasNotes = String(s.notes ?? "").trim().length > 0;
+      const hasVoice =
+        String(s.voice_memo_url ?? "").trim().length > 0 ||
+        String(s.voice_memo_path ?? "").trim().length > 0 ||
+        String(s.private_voice_memo_url ?? "").trim().length > 0 ||
+        String(s.private_voice_memo_path ?? "").trim().length > 0;
+      const passesQuickFilters =
+        (!quickFilters.voice || hasVoice) &&
+        (!quickFilters.annotations || hasAnnotations) &&
+        (!quickFilters.notes || hasNotes) &&
+        (!quickFilters.favorites || Boolean(s.is_favorite));
+      if (filters.length === 0) return matchesTag && matchesNotes && passesQuickFilters;
+      const pairs = attributesByScreenshot[s.id] ?? [];
+      const matchesAttributes = filters.every((filter) =>
+        pairs.some((a) => a.key === filter.key && a.value === filter.value)
+      );
+      return matchesTag && matchesNotes && passesQuickFilters && matchesAttributes;
+    });
+  }
+
   // --- Load screenshots for current user / active folder; hydrates tags, attributes, local annotation overrides ---
   const fetchScreenshots = async () => {
     setLoading(true);
@@ -696,7 +783,7 @@ export default function DashboardPage() {
     const initial = await supabase
       .from("screenshots")
       .select(
-        "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, annotations, annotation, is_new, is_updated, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
+        "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, annotations, annotation, is_new, is_updated, is_favorite, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
       )
       .eq("user_id", user.id)
       .order("created_at", {
@@ -709,12 +796,13 @@ export default function DashboardPage() {
     if (
       screenshotsError &&
       (screenshotsError.message.toLowerCase().includes("annotations") ||
-        screenshotsError.message.toLowerCase().includes("annotation"))
+        screenshotsError.message.toLowerCase().includes("annotation") ||
+        screenshotsError.message.toLowerCase().includes("is_favorite"))
     ) {
       const fallbackLegacy = await supabase
         .from("screenshots")
         .select(
-          "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, annotation, is_new, is_updated, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
+          "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, annotation, is_new, is_updated, is_favorite, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
         )
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
@@ -726,12 +814,13 @@ export default function DashboardPage() {
     // Final fallback when neither annotation column exists.
     if (
       screenshotsError &&
-      screenshotsError.message.toLowerCase().includes("annotation")
+      (screenshotsError.message.toLowerCase().includes("annotation") ||
+        screenshotsError.message.toLowerCase().includes("is_favorite"))
     ) {
       const fallbackBase = await supabase
         .from("screenshots")
         .select(
-          "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, is_new, is_updated, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
+          "id, image_url, created_at, tags, notes, folder_id, source_screenshot_id, is_new, is_updated, is_favorite, voice_memo_url, voice_memo_path, voice_memo_duration_ms, voice_memo_mime_type, voice_memo_size_bytes, voice_memo_updated_at"
         )
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
@@ -966,6 +1055,101 @@ export default function DashboardPage() {
     return Math.random().toString(36).substring(2, 10);
   }
 
+  const assetTypeOptions = ["Stocks", "Futures", "Forex", "Crypto", "Options"];
+  const timeframeOptions = ["Scalping", "Intraday", "Swing", "Position"];
+  const strategyTypeOptions = ["Breakout", "Reversal", "Trend", "Range", "Momentum"];
+  const experienceLevelOptions = ["Beginner", "Intermediate", "Advanced"];
+
+  function toStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((v) => String(v ?? "").trim())
+      .filter((v) => v.length > 0);
+  }
+
+  function toggleShareMultiValue(
+    setter: (updater: (prev: string[]) => string[]) => void,
+    value: string
+  ) {
+    setter((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    );
+  }
+
+  async function computePlaybookFeatureFlags(folderId: string): Promise<{
+    hasAnnotations: boolean;
+    hasNotes: boolean;
+    hasVoice: boolean;
+  }> {
+    const { data, error } = await supabase
+      .from("screenshots")
+      .select(
+        "id, notes, annotations, annotation, voice_memo_url, voice_memo_path, private_voice_memo_url, private_voice_memo_path"
+      )
+      .eq("folder_id", folderId);
+
+    if (error) {
+      const fallback = await supabase
+        .from("screenshots")
+        .select("id, notes, annotations, annotation, voice_memo_url, voice_memo_path")
+        .eq("folder_id", folderId);
+      if (fallback.error) {
+        throw new Error(fallback.error.message ?? "Could not load screenshots for feature flags.");
+      }
+      const rows = (fallback.data ?? []) as Array<Record<string, unknown>>;
+      const total = rows.length;
+      if (total === 0) {
+        return { hasAnnotations: false, hasNotes: false, hasVoice: false };
+      }
+      let annotationsCount = 0;
+      let notesCount = 0;
+      let voiceCount = 0;
+      for (const row of rows) {
+        const parsedAnnotation = parseAnnotationValue(row.annotations ?? row.annotation);
+        const hasAnnotation =
+          parsedAnnotation.shapes.length > 0 || parsedAnnotation.image.trim().length > 0;
+        if (hasAnnotation) annotationsCount += 1;
+        if (String(row.notes ?? "").trim().length > 0) notesCount += 1;
+        const hasVoice =
+          String(row.voice_memo_url ?? "").trim().length > 0 ||
+          String(row.voice_memo_path ?? "").trim().length > 0;
+        if (hasVoice) voiceCount += 1;
+      }
+      return {
+        hasAnnotations: annotationsCount / total >= 0.25,
+        hasNotes: notesCount / total >= 0.25,
+        hasVoice: voiceCount / total >= 0.25,
+      };
+    }
+
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    const total = rows.length;
+    if (total === 0) {
+      return { hasAnnotations: false, hasNotes: false, hasVoice: false };
+    }
+    let annotationsCount = 0;
+    let notesCount = 0;
+    let voiceCount = 0;
+    for (const row of rows) {
+      const parsedAnnotation = parseAnnotationValue(row.annotations ?? row.annotation);
+      const hasAnnotation =
+        parsedAnnotation.shapes.length > 0 || parsedAnnotation.image.trim().length > 0;
+      if (hasAnnotation) annotationsCount += 1;
+      if (String(row.notes ?? "").trim().length > 0) notesCount += 1;
+      const hasVoice =
+        String(row.voice_memo_url ?? "").trim().length > 0 ||
+        String(row.voice_memo_path ?? "").trim().length > 0 ||
+        String(row.private_voice_memo_url ?? "").trim().length > 0 ||
+        String(row.private_voice_memo_path ?? "").trim().length > 0;
+      if (hasVoice) voiceCount += 1;
+    }
+    return {
+      hasAnnotations: annotationsCount / total >= 0.25,
+      hasNotes: notesCount / total >= 0.25,
+      hasVoice: voiceCount / total >= 0.25,
+    };
+  }
+
   function openShareModal(folder: any) {
     if (folder?.is_imported) {
       showToast("Imported playbooks cannot be shared.");
@@ -980,6 +1164,10 @@ export default function DashboardPage() {
         ? folder.cover_url
         : null
     );
+    setShareAssetTypes(toStringArray(folder?.asset_types));
+    setShareTimeframe(String(folder?.timeframe ?? "").trim());
+    setShareStrategyTypes(toStringArray(folder?.strategy_types));
+    setShareExperienceLevel(String(folder?.experience_level ?? "").trim());
     setShareModalOpen(true);
   }
 
@@ -989,6 +1177,10 @@ export default function DashboardPage() {
     setShareSaving(false);
     setShareCoverUploading(false);
     setShareCoverUrl(null);
+    setShareAssetTypes([]);
+    setShareTimeframe("");
+    setShareStrategyTypes([]);
+    setShareExperienceLevel("");
   }
 
   function getFolderFallbackCoverUrl(folderId: string | null | undefined): string | null {
@@ -1032,7 +1224,18 @@ export default function DashboardPage() {
     folder: any,
     nextIsPaid: boolean,
     nextPrice: number,
-    nextCoverUrl: string | null
+    nextCoverUrl: string | null,
+    metadata: {
+      assetTypes: string[];
+      timeframe: string;
+      strategyTypes: string[];
+      experienceLevel: string;
+    },
+    featureFlags: {
+      hasAnnotations: boolean;
+      hasNotes: boolean;
+      hasVoice: boolean;
+    }
   ): Promise<boolean> {
     if (folder?.is_imported) {
       showToast("Imported playbooks cannot be shared.");
@@ -1054,18 +1257,43 @@ export default function DashboardPage() {
             is_paid: nextIsPaid,
             price: finalPrice,
             cover_url: nextCoverUrl,
+            asset_types: metadata.assetTypes,
+            timeframe: metadata.timeframe,
+            strategy_types: metadata.strategyTypes,
+            experience_level: metadata.experienceLevel,
+            has_annotations: featureFlags.hasAnnotations,
+            has_notes: featureFlags.hasNotes,
+            has_voice: featureFlags.hasVoice,
           })
           .eq("id", folder.id);
         shareError = firstTry.error;
-        if (shareError && shareError.message?.toLowerCase().includes("cover_url")) {
+        if (shareError && isOptionalSchemaMissing(shareError)) {
+          const msg = (shareError.message ?? "").toLowerCase();
+          const retryPayload: Record<string, unknown> = {
+            share_id: shareId,
+            is_public: true,
+            is_paid: nextIsPaid,
+            price: finalPrice,
+          };
+          if (!msg.includes("cover_url")) retryPayload.cover_url = nextCoverUrl;
+          if (!msg.includes("asset_types")) retryPayload.asset_types = metadata.assetTypes;
+          if (!msg.includes("timeframe")) retryPayload.timeframe = metadata.timeframe;
+          if (!msg.includes("strategy_types")) retryPayload.strategy_types = metadata.strategyTypes;
+          if (!msg.includes("experience_level")) {
+            retryPayload.experience_level = metadata.experienceLevel;
+          }
+          if (!msg.includes("has_annotations")) {
+            retryPayload.has_annotations = featureFlags.hasAnnotations;
+          }
+          if (!msg.includes("has_notes")) {
+            retryPayload.has_notes = featureFlags.hasNotes;
+          }
+          if (!msg.includes("has_voice")) {
+            retryPayload.has_voice = featureFlags.hasVoice;
+          }
           const retryNoCover = await supabase
             .from("folders")
-            .update({
-              share_id: shareId,
-              is_public: true,
-              is_paid: nextIsPaid,
-              price: finalPrice,
-            })
+            .update(retryPayload)
             .eq("id", folder.id);
           shareError = retryNoCover.error;
         }
@@ -1085,10 +1313,11 @@ export default function DashboardPage() {
             return true;
           }
         }
+        const errMsg = shareError.message ?? "";
         setError(
-          shareError.message.toLowerCase().includes("share_id")
+          errMsg.toLowerCase().includes("share_id")
             ? "folders.share_id column is missing. Please run DB migration to enable sharing."
-            : shareError.message
+            : errMsg || "Could not update sharing settings."
         );
         return false;
       }
@@ -1106,17 +1335,42 @@ export default function DashboardPage() {
           is_paid: nextIsPaid,
           price: finalPrice,
           cover_url: nextCoverUrl,
+          asset_types: metadata.assetTypes,
+          timeframe: metadata.timeframe,
+          strategy_types: metadata.strategyTypes,
+          experience_level: metadata.experienceLevel,
+          has_annotations: featureFlags.hasAnnotations,
+          has_notes: featureFlags.hasNotes,
+          has_voice: featureFlags.hasVoice,
         })
         .eq("id", folder.id);
       shareError = firstTry.error;
-      if (shareError && shareError.message?.toLowerCase().includes("cover_url")) {
+      if (shareError && isOptionalSchemaMissing(shareError)) {
+        const msg = (shareError.message ?? "").toLowerCase();
+        const retryPayload: Record<string, unknown> = {
+          is_public: true,
+          is_paid: nextIsPaid,
+          price: finalPrice,
+        };
+        if (!msg.includes("cover_url")) retryPayload.cover_url = nextCoverUrl;
+        if (!msg.includes("asset_types")) retryPayload.asset_types = metadata.assetTypes;
+        if (!msg.includes("timeframe")) retryPayload.timeframe = metadata.timeframe;
+        if (!msg.includes("strategy_types")) retryPayload.strategy_types = metadata.strategyTypes;
+        if (!msg.includes("experience_level")) {
+          retryPayload.experience_level = metadata.experienceLevel;
+        }
+        if (!msg.includes("has_annotations")) {
+          retryPayload.has_annotations = featureFlags.hasAnnotations;
+        }
+        if (!msg.includes("has_notes")) {
+          retryPayload.has_notes = featureFlags.hasNotes;
+        }
+        if (!msg.includes("has_voice")) {
+          retryPayload.has_voice = featureFlags.hasVoice;
+        }
         const retryNoCover = await supabase
           .from("folders")
-          .update({
-            is_public: true,
-            is_paid: nextIsPaid,
-            price: finalPrice,
-          })
+          .update(retryPayload)
           .eq("id", folder.id);
         shareError = retryNoCover.error;
       }
@@ -1137,7 +1391,7 @@ export default function DashboardPage() {
           return true;
         }
       }
-      setError(shareError.message);
+      setError(shareError.message ?? "Could not update sharing settings.");
       return false;
     }
 
@@ -1183,9 +1437,25 @@ export default function DashboardPage() {
   async function saveShareSettings() {
     if (!shareModalFolder) return;
     const parsedPrice = Number(price);
+    const normalizedAssetTypes = shareAssetTypes;
+    const normalizedTimeframe = shareTimeframe.trim();
+    const normalizedStrategyTypes = shareStrategyTypes;
+    const normalizedExperienceLevel = shareExperienceLevel.trim();
 
     if (isPaid && (!Number.isFinite(parsedPrice) || parsedPrice <= 0)) {
       showToast("Price must be greater than 0.");
+      return;
+    }
+    if (normalizedAssetTypes.length === 0) {
+      showToast("Select at least one asset type.");
+      return;
+    }
+    if (!normalizedTimeframe) {
+      showToast("Select a timeframe.");
+      return;
+    }
+    if (!normalizedExperienceLevel) {
+      showToast("Select an experience level.");
       return;
     }
 
@@ -1193,7 +1463,15 @@ export default function DashboardPage() {
     try {
       const fallbackCover = getFolderFallbackCoverUrl(String(shareModalFolder?.id ?? ""));
       const coverToSave = shareCoverUrl ?? fallbackCover ?? null;
-      const ok = await makePublic(shareModalFolder, isPaid, parsedPrice, coverToSave);
+      const featureFlags = await computePlaybookFeatureFlags(
+        String(shareModalFolder.id ?? "")
+      );
+      const ok = await makePublic(shareModalFolder, isPaid, parsedPrice, coverToSave, {
+        assetTypes: normalizedAssetTypes,
+        timeframe: normalizedTimeframe,
+        strategyTypes: normalizedStrategyTypes,
+        experienceLevel: normalizedExperienceLevel,
+      }, featureFlags);
       if (ok) showToast("Playbook is now public.");
       closeShareModal();
     } catch {
@@ -1202,15 +1480,29 @@ export default function DashboardPage() {
   }
 
   async function handleSaveView() {
-    if (!viewName || filters.length === 0) return;
+    const trimmedName = viewName.trim();
+    const hasAnyFilter =
+      filters.length > 0 ||
+      tagFilter.trim().length > 0 ||
+      searchQuery.trim().length > 0 ||
+      quickFilters.voice ||
+      quickFilters.annotations ||
+      quickFilters.notes ||
+      quickFilters.favorites;
+    if (!trimmedName || !hasAnyFilter) return;
 
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) return;
 
     await supabase.from("saved_views").insert({
       user_id: user.id,
-      name: viewName,
-      filters: filters,
+      name: trimmedName,
+      filters: {
+        attributeFilters: filters,
+        tagFilter,
+        searchQuery,
+        quickFilters,
+      },
     });
 
     setViewName("");
@@ -1219,7 +1511,41 @@ export default function DashboardPage() {
 
   function applyView(view: any) {
     if (!view?.filters) return;
-    setFilters(view.filters);
+    // Backward compatibility: older saved views stored `filters` as array only.
+    if (Array.isArray(view.filters)) {
+      setFilters(view.filters);
+      setTagFilter("");
+      setSearchQuery("");
+      setQuickFilters({
+        voice: false,
+        annotations: false,
+        notes: false,
+        favorites: false,
+      });
+      setActiveViewId(view.id);
+      return;
+    }
+
+    const payload = view.filters as {
+      attributeFilters?: Array<{ key: string; value: string }>;
+      tagFilter?: string;
+      searchQuery?: string;
+      quickFilters?: {
+        voice?: boolean;
+        annotations?: boolean;
+        notes?: boolean;
+        favorites?: boolean;
+      };
+    };
+    setFilters(payload.attributeFilters ?? []);
+    setTagFilter(String(payload.tagFilter ?? ""));
+    setSearchQuery(String(payload.searchQuery ?? ""));
+    setQuickFilters({
+      voice: Boolean(payload.quickFilters?.voice),
+      annotations: Boolean(payload.quickFilters?.annotations),
+      notes: Boolean(payload.quickFilters?.notes),
+      favorites: Boolean(payload.quickFilters?.favorites),
+    });
     setActiveViewId(view.id);
   }
 
@@ -1231,6 +1557,14 @@ export default function DashboardPage() {
     if (activeViewId === id) {
       setActiveViewId(null);
       setFilters([]);
+      setTagFilter("");
+      setSearchQuery("");
+      setQuickFilters({
+        voice: false,
+        annotations: false,
+        notes: false,
+        favorites: false,
+      });
     }
   }
 
@@ -1369,13 +1703,24 @@ export default function DashboardPage() {
     });
 
     setActiveFolderId(String(requestedFolderId));
+    setActiveView("dashboard");
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("view");
+    const qs = params.toString();
+    router.replace(qs ? `/dashboard?${qs}` : `/dashboard`);
     window.setTimeout(() => {
       const el = document.querySelector(
         `[data-folder-id="${String(requestedFolderId)}"]`
       ) as HTMLElement | null;
       el?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 80);
-  }, [checkingSession, requestedFolderId, folders]);
+  }, [checkingSession, requestedFolderId, folders, searchParams, router]);
+
+  // useEffect: keep layout view in sync with `?view=` when URL changes (back/forward, external links).
+  useEffect(() => {
+    const v = searchParams.get("view");
+    setActiveView(v === "marketplace" ? "marketplace" : "dashboard");
+  }, [searchParams]);
 
   // useEffect: visibility — refetch when user returns to the tab (sync importer rows without full reload).
   useEffect(() => {
@@ -1499,22 +1844,7 @@ export default function DashboardPage() {
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
-
-        const tagFilterLower = tagFilter.trim().toLowerCase();
-        const visible = screenshots.filter((s) => {
-          const matchesTag =
-            !tagFilterLower ||
-            s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-
-          if (filters.length === 0) return matchesTag;
-
-          const keyMap = attributeKeyValuesByScreenshot[s.id] ?? {};
-          const matchesAttributes = filters.every((filter) =>
-            (keyMap[filter.key] ?? []).includes(filter.value)
-          );
-
-          return matchesTag && matchesAttributes;
-        });
+        const visible = applyDashboardScreenshotFilters(screenshots);
 
         setSelectedIds(visible.map((s) => s.id));
       }
@@ -1527,7 +1857,7 @@ export default function DashboardPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [screenshots, tagFilter, filters, attributeKeyValuesByScreenshot]);
+  }, [screenshots, tagFilter, filters, quickFilters, attributeKeyValuesByScreenshot]);
 
   // useEffect: lock body scroll while screenshot detail modal is open.
   useEffect(() => {
@@ -1686,22 +2016,7 @@ export default function DashboardPage() {
 
       if (showFilterMenu) return;
 
-      const tagFilterLower = tagFilter.trim().toLowerCase();
-
-      const filteredScreenshots = screenshots.filter((s) => {
-        const matchesTag =
-          !tagFilterLower ||
-          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-
-        const pairs = attributesByScreenshot[s.id] ?? [];
-        const matchesAttribute =
-          filters.length === 0 ||
-          filters.every((f) =>
-            pairs.some((a) => a.key === f.key && a.value === f.value)
-          );
-
-        return matchesTag && matchesAttribute;
-      });
+      const filteredScreenshots = applyDashboardScreenshotFilters(screenshots);
 
       if (selectedIndex === null) return;
       if (selectedIndex < 0 || selectedIndex >= filteredScreenshots.length) return;
@@ -1725,23 +2040,27 @@ export default function DashboardPage() {
   }, [
     screenshots,
     tagFilter,
+    searchQuery,
     filters,
+    quickFilters,
     attributesByScreenshot,
     showFilterMenu,
     selectedIndex,
   ]);
 
-  // useEffect: Escape always closes the screenshot modal (dedicated listener; runs once).
+  // useEffect: Escape closes the screenshot modal with exit animation (after filter menu / etc.).
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setSelectedIndex(null);
+      if (e.key !== "Escape") return;
+      if (showFilterMenu) return;
+      if (selectedIndex !== null) {
+        setModalPresentationOpen(false);
       }
     }
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, []);
+  }, [showFilterMenu, selectedIndex]);
 
   // useEffect: double rAF so modal CSS transition can run after open (staggered enter state).
   useEffect(() => {
@@ -1771,22 +2090,7 @@ export default function DashboardPage() {
       return;
     }
 
-    const tagFilterLower = tagFilter.trim().toLowerCase();
-
-    const filtered = screenshots.filter((s) => {
-      const matchesTag =
-        !tagFilterLower ||
-        s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-
-      const pairs = attributesByScreenshot[s.id] ?? [];
-      const matchesAttribute =
-        filters.length === 0 ||
-        filters.every((f) =>
-          pairs.some((a) => a.key === f.key && a.value === f.value)
-        );
-
-      return matchesTag && matchesAttribute;
-    });
+    const filtered = applyDashboardScreenshotFilters(screenshots);
 
     const shot = filtered[selectedIndex];
     setCurrentNote(shot?.notes ?? "");
@@ -1795,7 +2099,9 @@ export default function DashboardPage() {
     selectedIndex,
     screenshots,
     tagFilter,
+    searchQuery,
     filters,
+    quickFilters,
     attributesByScreenshot,
   ]);
 
@@ -1838,22 +2144,7 @@ export default function DashboardPage() {
         return;
       }
 
-      const tagFilterLower = tagFilter.trim().toLowerCase();
-
-      const filtered = screenshots.filter((s) => {
-        const matchesTag =
-          !tagFilterLower ||
-          s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-
-        const pairs = attributesByScreenshot[s.id] ?? [];
-        const matchesAttribute =
-          filters.length === 0 ||
-          filters.every((f) =>
-            pairs.some((a) => a.key === f.key && a.value === f.value)
-          );
-
-        return matchesTag && matchesAttribute;
-      });
+      const filtered = applyDashboardScreenshotFilters(screenshots);
 
       const screenshot = filtered[selectedIndex];
       if (!screenshot) {
@@ -1881,8 +2172,11 @@ export default function DashboardPage() {
     };
   }, [
     selectedIndex,
+    screenshots,
     tagFilter,
+    searchQuery,
     filters,
+    quickFilters,
     attributesByScreenshot,
   ]);
 
@@ -2502,7 +2796,7 @@ export default function DashboardPage() {
 
       setBulkTargetIds([]);
       setBulkBaseAttributes(null);
-      setSelectedIndex(null);
+      requestCloseScreenshotModal();
       return;
     }
 
@@ -2539,23 +2833,55 @@ export default function DashboardPage() {
     setUndoData(null);
   }
 
-  const tagFilterLower = tagFilter.trim().toLowerCase();
-
-  const filteredScreenshots = screenshots.filter((s) => {
-    const matchesTag =
-      !tagFilterLower ||
-      s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-
-    if (filters.length === 0) return matchesTag;
-
-    const pairs = attributesByScreenshot[s.id] ?? [];
-    const matchesAttributes = filters.every((filter) =>
-      pairs.some(
-        (a) => a.key === filter.key && a.value === filter.value
+  async function toggleScreenshotFavorite(
+    screenshotId: string,
+    nextIsFavorite: boolean
+  ) {
+    setScreenshots((prev) =>
+      prev.map((s) =>
+        String(s.id) === String(screenshotId) ? { ...s, is_favorite: nextIsFavorite } : s
+      )
+    );
+    setAllScreenshots((prev: any[]) =>
+      prev.map((s) =>
+        String(s.id) === String(screenshotId) ? { ...s, is_favorite: nextIsFavorite } : s
       )
     );
 
-    return matchesTag && matchesAttributes;
+    const { error: favError } = await supabase
+      .from("screenshots")
+      .update({ is_favorite: nextIsFavorite })
+      .eq("id", screenshotId);
+
+    if (favError) {
+      setScreenshots((prev) =>
+        prev.map((s) =>
+          String(s.id) === String(screenshotId) ? { ...s, is_favorite: !nextIsFavorite } : s
+        )
+      );
+      setAllScreenshots((prev: any[]) =>
+        prev.map((s) =>
+          String(s.id) === String(screenshotId) ? { ...s, is_favorite: !nextIsFavorite } : s
+        )
+      );
+      const msg = (favError.message ?? "").toLowerCase();
+      if (msg.includes("is_favorite")) {
+        setError(
+          "favorites column missing. Run the latest Supabase migration to enable screenshot favorites."
+        );
+      } else {
+        setError(favError.message ?? "Could not update favorite.");
+      }
+    }
+  }
+
+  const filteredScreenshots = applyDashboardScreenshotFilters(screenshots);
+  const screenshotFilterSignature = JSON.stringify({
+    tagFilter,
+    searchQuery,
+    filters,
+    quickFilters,
+    count: filteredScreenshots.length,
   });
 
   const selectedImage =
@@ -3481,7 +3807,8 @@ export default function DashboardPage() {
       .filter((f: any) => folderMatchesParent(f, parentId))
       .map((folder: any) => {
         const isExpanded = expandedFolders.has(String(folder.id));
-        const isActive = activeFolderId === folder.id;
+        const isActive =
+          activeView === "dashboard" && activeFolderId === folder.id;
         const newInFolder =
           newScreenshotCountByFolderId.get(String(folder.id)) ?? 0;
 
@@ -3551,7 +3878,10 @@ export default function DashboardPage() {
               )}
 
               <span
-                onClick={() => setActiveFolderId(folder.id)}
+                onClick={() => {
+                  navigateDashboardView("dashboard");
+                  setActiveFolderId(folder.id);
+                }}
                 className={`flex min-w-0 flex-1 items-center gap-1.5 text-sm ${
                   isActive ? "font-semibold" : "font-medium"
                 }`}
@@ -4437,17 +4767,56 @@ export default function DashboardPage() {
         <div className="space-y-1">
           <button
             type="button"
-            onClick={() => setActiveFolderId(null)}
+            onClick={() => navigateDashboardView("marketplace")}
             className={`
-              w-full rounded-lg px-3 py-2 text-left text-sm
+              flex w-full items-stretch overflow-hidden rounded-lg text-left text-sm
               transition-all duration-150
-              ${activeFolderId === null
-                ? "bg-gray-900 text-white hover:bg-gray-800"
-                : "text-gray-700 hover:bg-gray-100"
+              ${
+                activeView === "marketplace"
+                  ? "bg-gray-200 font-medium text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+                  : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
               }
             `}
           >
-            All Screenshots
+            <span
+              className={`w-1 shrink-0 rounded-sm ${
+                activeView === "marketplace" ? "bg-blue-500" : "bg-transparent"
+              }`}
+              aria-hidden
+            />
+            <span className="flex flex-1 items-center px-3 py-2">
+              <Compass className="mr-2 inline-block h-4 w-4 shrink-0" aria-hidden />
+              Marketplace
+            </span>
+          </button>
+
+          <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
+
+          <button
+            type="button"
+            onClick={() => {
+              navigateDashboardView("dashboard");
+              setActiveFolderId(null);
+            }}
+            className={`
+              flex w-full items-stretch overflow-hidden rounded-lg text-left text-sm
+              transition-all duration-150
+              ${
+                activeView === "dashboard" && activeFolderId === null
+                  ? "bg-gray-200 font-medium text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+                  : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+              }
+            `}
+          >
+            <span
+              className={`w-1 shrink-0 rounded-sm ${
+                activeView === "dashboard" && activeFolderId === null
+                  ? "bg-blue-500"
+                  : "bg-transparent"
+              }`}
+              aria-hidden
+            />
+            <span className="flex flex-1 items-center px-3 py-2">All Screenshots</span>
           </button>
 
           {topLevelFolders.length === 0 ? (
@@ -4759,11 +5128,41 @@ export default function DashboardPage() {
             <div className="py-20 text-center">
               <p className="text-sm text-gray-600">Checking your session...</p>
             </div>
-          ) : loading ? (
-            <div className="py-20 text-center">
-              <p className="text-sm text-gray-600">Loading screenshots...</p>
-            </div>
           ) : (
+            <AnimatePresence mode="wait">
+              {activeView === "marketplace" ? (
+                <motion.div
+                  key={activeView}
+                  className="w-full"
+                  initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                >
+                  <MarketplaceView />
+                </motion.div>
+              ) : loading ? (
+                <motion.div
+                  key={activeView}
+                  className="w-full"
+                  initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                >
+                  <div className="py-20 text-center">
+                    <p className="text-sm text-gray-600">Loading screenshots...</p>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={activeView}
+                  className="w-full"
+                  initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                >
             <>
               <div className="mb-6">
                 <h2 className="text-lg font-semibold text-gray-900">Your Screenshots</h2>
@@ -4849,14 +5248,8 @@ export default function DashboardPage() {
                   ))}
                 </div>
 
-                <input
-                  type="text"
-                  value={tagFilter}
-                  onChange={(e) => setTagFilter(e.target.value)}
-                  placeholder="Filter by tag..."
-                  className="mb-4 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
-                />
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="mb-3 flex flex-wrap items-start gap-2">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -4878,6 +5271,86 @@ export default function DashboardPage() {
                     Select All
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuickFilters((prev) => ({ ...prev, voice: !prev.voice }))
+                    }
+                    className={`rounded-full px-3 py-1 text-xs transition ${
+                      quickFilters.voice
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    Has Voice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuickFilters((prev) => ({
+                        ...prev,
+                        annotations: !prev.annotations,
+                      }))
+                    }
+                    className={`rounded-full px-3 py-1 text-xs transition ${
+                      quickFilters.annotations
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    Has Annotations
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuickFilters((prev) => ({ ...prev, notes: !prev.notes }))
+                    }
+                    className={`rounded-full px-3 py-1 text-xs transition ${
+                      quickFilters.notes
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    Has Notes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuickFilters((prev) => ({ ...prev, favorites: !prev.favorites }))
+                    }
+                    className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition ${
+                      quickFilters.favorites
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    <Star
+                      className={`h-3.5 w-3.5 ${quickFilters.favorites ? "fill-current" : ""}`}
+                      aria-hidden
+                    />
+                    Favorites
+                  </button>
+                  </div>
+                  <div className="ml-auto w-full max-w-xs">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search notes..."
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={tagFilter}
+                    onChange={(e) => setTagFilter(e.target.value)}
+                    placeholder="Filter by tag..."
+                    className="min-w-[220px] flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
+                  />
+
                   {filters.map((f, index) => (
                     <div
                       key={`${f.key}-${f.value}-${index}`}
@@ -4896,6 +5369,67 @@ export default function DashboardPage() {
                       </button>
                     </div>
                   ))}
+
+                  {quickFilters.voice && (
+                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                      <span className="font-medium">Has Voice</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickFilters((prev) => ({ ...prev, voice: false }))
+                        }
+                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
+                        aria-label="Remove voice filter"
+                      >
+                        <X className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
+                  )}
+                  {quickFilters.annotations && (
+                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                      <span className="font-medium">Has Annotations</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickFilters((prev) => ({ ...prev, annotations: false }))
+                        }
+                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
+                        aria-label="Remove annotations filter"
+                      >
+                        <X className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
+                  )}
+                  {quickFilters.notes && (
+                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                      <span className="font-medium">Has Notes</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickFilters((prev) => ({ ...prev, notes: false }))
+                        }
+                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
+                        aria-label="Remove notes filter"
+                      >
+                        <X className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
+                  )}
+                  {quickFilters.favorites && (
+                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                      <span className="font-medium">Favorites</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickFilters((prev) => ({ ...prev, favorites: false }))
+                        }
+                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
+                        aria-label="Remove favorites filter"
+                      >
+                        <X className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {showFilterMenu && (
@@ -4958,13 +5492,19 @@ export default function DashboardPage() {
                 )}
               </div>
 
+              <motion.div
+                key={screenshotFilterSignature}
+                initial={{ opacity: 0.5 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
               {filteredScreenshots.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500">
                   <p className="mb-2 text-sm font-medium text-gray-900">
-                    No screenshots found
+                    No screenshots match your filters
                   </p>
                   <p className="text-xs text-gray-500">
-                    Try clearing filters, or drag & drop screenshots to get started.
+                    Try adjusting filters, or drag & drop screenshots to get started.
                   </p>
                 </div>
               ) : (
@@ -5071,6 +5611,25 @@ export default function DashboardPage() {
                           <Check className="w-4 h-4 text-green-600" aria-hidden />
                         </div>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          void toggleScreenshotFavorite(
+                            shot.id,
+                            !Boolean(shot.is_favorite)
+                          );
+                        }}
+                        className="absolute right-2 top-2 z-20 rounded-full bg-black/55 p-1.5 text-white transition hover:bg-black/70"
+                        title={shot.is_favorite ? "Remove favorite" : "Mark favorite"}
+                        aria-label={shot.is_favorite ? "Remove favorite" : "Mark favorite"}
+                      >
+                        <Star
+                          className={`h-4 w-4 ${shot.is_favorite ? "fill-current" : ""}`}
+                          aria-hidden
+                        />
+                      </button>
                       <div
                         className={`relative h-48 w-full overflow-hidden ${
                           highlightNew
@@ -5189,9 +5748,13 @@ export default function DashboardPage() {
                   })}
                 </div>
               )}
+              </motion.div>
             </>
               )}
             </>
+                </motion.div>
+              )}
+            </AnimatePresence>
           )}
         </div>
       </div>
@@ -5321,7 +5884,7 @@ export default function DashboardPage() {
           onClick={() => closeShareModal()}
         >
           <div
-            className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl"
+            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="mb-4 text-sm font-semibold text-gray-900">
@@ -5375,6 +5938,106 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+
+            <div className="mt-4">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Asset Type <span className="text-red-600">*</span>
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {assetTypeOptions.map((option) => {
+                  const selected = shareAssetTypes.includes(option);
+                  return (
+                    <button
+                      key={`asset-${option}`}
+                      type="button"
+                      onClick={() => toggleShareMultiValue(setShareAssetTypes, option)}
+                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                        selected
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Timeframe <span className="text-red-600">*</span>
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {timeframeOptions.map((option) => {
+                  const selected = shareTimeframe === option;
+                  return (
+                    <button
+                      key={`timeframe-${option}`}
+                      type="button"
+                      onClick={() => setShareTimeframe(option)}
+                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                        selected
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Strategy Type
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {strategyTypeOptions.map((option) => {
+                  const selected = shareStrategyTypes.includes(option);
+                  return (
+                    <button
+                      key={`strategy-${option}`}
+                      type="button"
+                      onClick={() => toggleShareMultiValue(setShareStrategyTypes, option)}
+                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                        selected
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Experience Level <span className="text-red-600">*</span>
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {experienceLevelOptions.map((option) => {
+                  const selected = shareExperienceLevel === option;
+                  return (
+                    <button
+                      key={`experience-${option}`}
+                      type="button"
+                      onClick={() => setShareExperienceLevel(option)}
+                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                        selected
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             <div className="mt-4">
               <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -5433,7 +6096,13 @@ export default function DashboardPage() {
                 type="button"
                 onClick={() => void saveShareSettings()}
                 className="btn btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={shareSaving || (isPaid && Number(price) <= 0)}
+                disabled={
+                  shareSaving ||
+                  (isPaid && Number(price) <= 0) ||
+                  shareAssetTypes.length === 0 ||
+                  !shareTimeframe.trim() ||
+                  !shareExperienceLevel.trim()
+                }
               >
                 {shareSaving ? "Saving…" : "Save"}
               </button>
@@ -5567,26 +6236,53 @@ export default function DashboardPage() {
         </div>
       )}
       {mounted &&
+        selectedIndex !== null &&
         selectedImage &&
         createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/60 backdrop-blur-sm group">
+          <AnimatePresence
+            mode="wait"
+            onExitComplete={handleScreenshotModalExitComplete}
+          >
+            {modalPresentationOpen && (
+              <motion.div
+                key="screenshot-modal"
+                className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/60 backdrop-blur-sm group"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
             {/* Dismiss layer (behind sheet) */}
             <div
               className="absolute inset-0 z-0 cursor-pointer"
-              onClick={() => setSelectedIndex(null)}
+              onClick={requestCloseScreenshotModal}
             />
 
-            <div className="animate-[fadeIn_0.2s_ease-out] absolute inset-0 z-10 flex min-h-0 min-w-0 overflow-hidden bg-white shadow-xl">
+            <motion.div
+              className="absolute inset-0 z-10 flex min-h-0 min-w-0 overflow-hidden bg-white shadow-xl"
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
               {/* LEFT: IMAGE */}
               <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
                 <div className="relative flex h-full min-h-0 w-full items-center justify-center p-2">
-                  <div className="relative inline-block max-h-full max-w-full">
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                      key={selectedImage.id}
+                      className="relative inline-block max-h-full max-w-full"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      transition={{ duration: 0.2 }}
+                    >
                     <img
                       ref={imageRef}
                       src={filteredScreenshots[selectedIndex!].image_url}
                       alt=""
                       draggable={false}
-                      className="block cursor-default animate-[fadeIn_0.2s_ease-out] rounded-md object-contain shadow-lg"
+                      className="block cursor-default rounded-md object-contain shadow-lg"
                       style={{
                         maxHeight: "calc(100vh - 24px)",
                         maxWidth: `calc(100vw - ${panelWidth + annotationToolbarWidth + 48}px)`,
@@ -5648,7 +6344,8 @@ export default function DashboardPage() {
                         }}
                       />
                     )}
-                  </div>
+                  </motion.div>
+                  </AnimatePresence>
                 </div>
               </div>
 
@@ -6290,12 +6987,12 @@ export default function DashboardPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </motion.div>
 
             {/* Fixed controls — above sheet + image so they’re never covered or clipped */}
             <button
               type="button"
-              onClick={() => setSelectedIndex(null)}
+              onClick={requestCloseScreenshotModal}
               aria-label="Close modal"
               className="fixed top-4 z-[2147483646] flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white shadow-lg transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900 cursor-pointer"
               style={{
@@ -6376,7 +7073,9 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
-          </div>,
+              </motion.div>
+            )}
+          </AnimatePresence>,
           document.body
         )}
 
@@ -6499,6 +7198,20 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-background text-sm text-gray-600">
+          Loading…
+        </div>
+      }
+    >
+      <DashboardPageContent />
+    </Suspense>
   );
 }
 
