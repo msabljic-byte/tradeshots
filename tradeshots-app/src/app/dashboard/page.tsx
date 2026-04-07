@@ -401,6 +401,8 @@ export default function DashboardPage() {
   const [isPaid, setIsPaid] = useState(false);
   const [price, setPrice] = useState("");
   const [shareSaving, setShareSaving] = useState(false);
+  const [shareCoverUrl, setShareCoverUrl] = useState<string | null>(null);
+  const [shareCoverUploading, setShareCoverUploading] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const skipSidebarPersistRef = useRef(true);
@@ -973,6 +975,11 @@ export default function DashboardPage() {
     setIsPaid(Boolean(folder?.is_paid));
     const nextPrice = Number(folder?.price ?? 0);
     setPrice(nextPrice > 0 ? String(nextPrice) : "");
+    setShareCoverUrl(
+      typeof folder?.cover_url === "string" && folder.cover_url.trim().length > 0
+        ? folder.cover_url
+        : null
+    );
     setShareModalOpen(true);
   }
 
@@ -980,9 +987,53 @@ export default function DashboardPage() {
     setShareModalOpen(false);
     setShareModalFolder(null);
     setShareSaving(false);
+    setShareCoverUploading(false);
+    setShareCoverUrl(null);
   }
 
-  async function makePublic(folder: any, nextIsPaid: boolean, nextPrice: number): Promise<boolean> {
+  function getFolderFallbackCoverUrl(folderId: string | null | undefined): string | null {
+    if (!folderId) return null;
+    const firstShot = allScreenshots.find(
+      (s: any) => String(s.folder_id ?? "") === String(folderId)
+    );
+    const url = firstShot?.image_url;
+    return typeof url === "string" && url.trim().length > 0 ? url : null;
+  }
+
+  async function uploadShareCover(file: File) {
+    if (!shareModalFolder?.id) return;
+    setShareCoverUploading(true);
+    setError(null);
+    try {
+      const ext = (file.name.split(".").pop() || "png").toLowerCase();
+      const safeExt = ext.replace(/[^a-z0-9]/g, "") || "png";
+      const path = `covers/cover-${shareModalFolder.id}-${Date.now()}.${safeExt}`;
+      const { error: uploadError } = await supabase.storage
+        .from("screenshots")
+        .upload(path, file, { upsert: true, contentType: file.type || "image/png" });
+      if (uploadError) {
+        setError(uploadError.message);
+        return;
+      }
+      const { data } = supabase.storage.from("screenshots").getPublicUrl(path);
+      const publicUrl = data?.publicUrl ?? null;
+      if (!publicUrl) {
+        setError("Could not resolve uploaded cover URL.");
+        return;
+      }
+      setShareCoverUrl(publicUrl);
+      showToast("Cover uploaded");
+    } finally {
+      setShareCoverUploading(false);
+    }
+  }
+
+  async function makePublic(
+    folder: any,
+    nextIsPaid: boolean,
+    nextPrice: number,
+    nextCoverUrl: string | null
+  ): Promise<boolean> {
     if (folder?.is_imported) {
       showToast("Imported playbooks cannot be shared.");
       return false;
@@ -993,16 +1044,32 @@ export default function DashboardPage() {
     // Preserve existing share_id (keep it stable). Only generate if missing.
     if (!shareId) {
       shareId = generateShareId();
-      const { error: shareError } = await supabase
-        .from("folders")
-        .update({
-          share_id: shareId,
-          is_public: true,
-          is_paid: nextIsPaid,
-          price: finalPrice,
-        })
-        .eq("id", folder.id);
-
+      let shareError: { message?: string } | null = null;
+      {
+        const firstTry = await supabase
+          .from("folders")
+          .update({
+            share_id: shareId,
+            is_public: true,
+            is_paid: nextIsPaid,
+            price: finalPrice,
+            cover_url: nextCoverUrl,
+          })
+          .eq("id", folder.id);
+        shareError = firstTry.error;
+        if (shareError && shareError.message?.toLowerCase().includes("cover_url")) {
+          const retryNoCover = await supabase
+            .from("folders")
+            .update({
+              share_id: shareId,
+              is_public: true,
+              is_paid: nextIsPaid,
+              price: finalPrice,
+            })
+            .eq("id", folder.id);
+          shareError = retryNoCover.error;
+        }
+      }
       if (shareError) {
         if (isOptionalSchemaMissing(shareError)) {
           // Older schema: fall back to minimum share enable via share_id only.
@@ -1030,14 +1097,30 @@ export default function DashboardPage() {
       return true;
     }
 
-    const { error: shareError } = await supabase
-      .from("folders")
-      .update({
-        is_public: true,
-        is_paid: nextIsPaid,
-        price: finalPrice,
-      })
-      .eq("id", folder.id);
+    let shareError: { message?: string } | null = null;
+    {
+      const firstTry = await supabase
+        .from("folders")
+        .update({
+          is_public: true,
+          is_paid: nextIsPaid,
+          price: finalPrice,
+          cover_url: nextCoverUrl,
+        })
+        .eq("id", folder.id);
+      shareError = firstTry.error;
+      if (shareError && shareError.message?.toLowerCase().includes("cover_url")) {
+        const retryNoCover = await supabase
+          .from("folders")
+          .update({
+            is_public: true,
+            is_paid: nextIsPaid,
+            price: finalPrice,
+          })
+          .eq("id", folder.id);
+        shareError = retryNoCover.error;
+      }
+    }
 
     if (shareError) {
       if (isOptionalSchemaMissing(shareError)) {
@@ -1108,7 +1191,9 @@ export default function DashboardPage() {
 
     setShareSaving(true);
     try {
-      const ok = await makePublic(shareModalFolder, isPaid, parsedPrice);
+      const fallbackCover = getFolderFallbackCoverUrl(String(shareModalFolder?.id ?? ""));
+      const coverToSave = shareCoverUrl ?? fallbackCover ?? null;
+      const ok = await makePublic(shareModalFolder, isPaid, parsedPrice, coverToSave);
       if (ok) showToast("Playbook is now public.");
       closeShareModal();
     } catch {
@@ -5290,6 +5375,50 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+
+            <div className="mt-4">
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Cover Image (optional)
+              </label>
+              <div className="mt-2 rounded-lg border border-gray-300 bg-white p-2">
+                <img
+                  src={
+                    shareCoverUrl ??
+                    getFolderFallbackCoverUrl(String(shareModalFolder?.id ?? "")) ??
+                    "data:image/gif;base64,R0lGODlhAQABAAAAACw="
+                  }
+                  alt="Playbook cover preview"
+                  className="h-24 w-full rounded object-cover"
+                />
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700 hover:bg-gray-100">
+                  {shareCoverUploading ? "Uploading..." : "Upload / Replace"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={shareCoverUploading || shareSaving}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        void uploadShareCover(file);
+                      }
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+                {shareCoverUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setShareCoverUrl(null)}
+                    className="text-sm text-gray-600 hover:text-gray-900"
+                  >
+                    Use first screenshot
+                  </button>
+                )}
+              </div>
+            </div>
 
             <div className="mt-6 flex justify-end gap-2">
               <button

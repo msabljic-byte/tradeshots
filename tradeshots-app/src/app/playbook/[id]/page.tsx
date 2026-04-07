@@ -654,7 +654,7 @@ export default function PublicPlaybookPage() {
       let folderQuery = await supabase
         .from("folders")
         .select(
-          "id, name, description, share_id, is_paid, price"
+          "id, name, description, share_id, is_paid, price, cover_url"
         )
         .eq("share_id", shareId)
         .limit(1);
@@ -664,10 +664,24 @@ export default function PublicPlaybookPage() {
         const shareIdTrimmed = shareId.trim();
         const ilikeQuery = await supabase
           .from("folders")
-          .select("id, name, description, share_id, is_paid, price")
+          .select("id, name, description, share_id, is_paid, price, cover_url")
           .ilike("share_id", shareIdTrimmed)
           .limit(1);
         folderQuery = ilikeQuery;
+      }
+
+      // Optional cover column fallback while preserving paid columns.
+      if (
+        folderQuery.error &&
+        isOptionalSchemaMissing(folderQuery.error) &&
+        (folderQuery.error.message ?? "").toLowerCase().includes("cover_url")
+      ) {
+        const retry = await supabase
+          .from("folders")
+          .select("id, name, description, share_id, is_paid, price")
+          .eq("share_id", shareId)
+          .limit(1);
+        folderQuery = retry;
       }
 
       // Older schemas may not have paid-pricing columns yet.
@@ -791,6 +805,11 @@ export default function PublicPlaybookPage() {
     return <div className="p-6 text-sm text-gray-700">{error ?? "Not found"}</div>;
   }
 
+  const coverImageUrl =
+    (typeof folder.cover_url === "string" && folder.cover_url.trim().length > 0
+      ? folder.cover_url
+      : null) ?? (screenshots[0]?.image_url ?? null);
+
   if (!hasAccess || !isUnlocked) {
     return (
       <div className="min-h-screen bg-background">
@@ -800,6 +819,17 @@ export default function PublicPlaybookPage() {
           </div>
 
           <h1 className="text-2xl font-bold text-gray-900">{folder.name}</h1>
+
+          {coverImageUrl && (
+            <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+              <img
+                src={coverImageUrl}
+                alt="Playbook cover"
+                className="h-56 w-full object-cover"
+                draggable={false}
+              />
+            </div>
+          )}
 
           {folder.description && (
             <p className="mx-auto mt-4 max-w-2xl text-gray-600">{folder.description}</p>
@@ -929,6 +959,16 @@ export default function PublicPlaybookPage() {
 
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">{folder.name}</h1>
+          {coverImageUrl && (
+            <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+              <img
+                src={coverImageUrl}
+                alt="Playbook cover"
+                className="h-48 w-full object-cover"
+                draggable={false}
+              />
+            </div>
+          )}
           {folder.description && (
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
               {folder.description}
