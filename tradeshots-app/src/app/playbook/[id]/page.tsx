@@ -734,9 +734,7 @@ export default function PublicPlaybookPage() {
             </p>
           )}
           <p className="mt-1 text-sm text-gray-500">Shared playbook</p>
-          <p className="mt-1 text-xs text-gray-400">
-            by {folder.owner_email || "Trader"}
-          </p>
+          <p className="mt-1 text-xs text-gray-400">by Trader</p>
         </div>
 
         {error && (
