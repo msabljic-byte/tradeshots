@@ -344,6 +344,10 @@ function getNotificationIcon(
       return <RefreshCw className={common} />;
     case "payment":
       return <CreditCard className={common} />;
+    case "comment":
+      return <MessageCircle className={common} />;
+    case "reply":
+      return <MessageSquareReply className={common} />;
     default:
       return <Bell className={common} />;
   }
@@ -656,6 +660,21 @@ function DashboardPageContent() {
       .eq("user_id", auth.user.id);
 
     await loadNotifications();
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    if (!notificationId) return;
+    await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("id", notificationId);
+    setNotifications((prev) =>
+      prev.map((notification) =>
+        notification.id === notificationId
+          ? { ...notification, is_read: true }
+          : notification
+      )
+    );
   }
 
   /** "Playbook updated" rows include `source_folder_id` (author root) and we resolve the importer copy folder. */
@@ -3907,9 +3926,9 @@ function DashboardPageContent() {
                   className="text-gray-600 transition-colors duration-150 hover:text-black cursor-pointer"
                 >
                   {isExpanded ? (
-                    <ChevronDown className="w-4 h-4" aria-hidden />
+                    <ChevronDown size={16} aria-hidden />
                   ) : (
-                    <ChevronRight className="w-4 h-4" aria-hidden />
+                    <ChevronRight size={16} aria-hidden />
                   )}
                 </button>
               ) : (
@@ -3921,12 +3940,12 @@ function DashboardPageContent() {
                   navigateDashboardView("dashboard");
                   setActiveFolderId(folder.id);
                 }}
-                className={`flex min-w-0 flex-1 items-center gap-1.5 text-sm ${
+                className={`flex min-w-0 flex-1 items-center gap-2 text-sm ${
                   isActive ? "font-semibold" : "font-medium"
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-2">
-                  <Folder className="w-4 h-4 shrink-0 text-gray-600" aria-hidden />
+                  <Folder size={16} className="shrink-0 text-gray-600" aria-hidden />
                   <span className="min-w-0 truncate">{folder.name}</span>
                 </span>
                 {folder.is_imported ? (
@@ -3969,10 +3988,10 @@ function DashboardPageContent() {
                         void navigator.clipboard.writeText(url);
                         showToast("Link copied");
                       }}
-                      className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                      className="text-sm font-medium text-gray-700 transition-colors duration-150 hover:text-black dark:text-gray-300"
                       title="Copy link"
                     >
-                      <LinkIcon className="w-4 h-4" aria-hidden />
+                      <LinkIcon size={16} aria-hidden />
                     </button>
 
                     <button
@@ -3982,10 +4001,10 @@ function DashboardPageContent() {
                         const ok = await makePrivate(folder);
                         if (ok) showToast("Sharing disabled");
                       }}
-                      className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                      className="text-sm font-medium text-gray-700 transition-colors duration-150 hover:text-black dark:text-gray-300"
                       title="Make private"
                     >
-                      <Lock className="w-4 h-4" aria-hidden />
+                      <Lock size={16} aria-hidden />
                     </button>
 
                     <button
@@ -3994,10 +4013,10 @@ function DashboardPageContent() {
                         e.stopPropagation();
                         openShareModal(folder);
                       }}
-                      className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                      className="text-sm font-medium text-gray-700 transition-colors duration-150 hover:text-black dark:text-gray-300"
                       title="Edit pricing"
                     >
-                      <CreditCard className="w-4 h-4" aria-hidden />
+                      <CreditCard size={16} aria-hidden />
                     </button>
                     </>
                   ) : (
@@ -4007,10 +4026,10 @@ function DashboardPageContent() {
                         e.stopPropagation();
                         openShareModal(folder);
                       }}
-                      className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                      className="text-sm font-medium text-gray-700 transition-colors duration-150 hover:text-black dark:text-gray-300"
                       title="Make public"
                     >
-                      <Globe className="w-4 h-4" aria-hidden />
+                      <Globe size={16} aria-hidden />
                     </button>
                   )
                 ) : null}
@@ -4021,9 +4040,9 @@ function DashboardPageContent() {
                     e.stopPropagation();
                     void renameFolder(folder.id, folder.name);
                   }}
-                  className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                  className="text-sm font-medium text-gray-700 transition-colors duration-150 hover:text-black dark:text-gray-300"
                 >
-                  <Pencil className="w-4 h-4" aria-hidden />
+                  <Pencil size={16} aria-hidden />
                 </button>
 
                 <button
@@ -4032,9 +4051,9 @@ function DashboardPageContent() {
                     e.stopPropagation();
                     setFolderToDelete(folder.id);
                   }}
-                  className="text-sm text-gray-600 transition-colors duration-150 hover:text-black"
+                  className="text-sm font-medium text-gray-700 transition-colors duration-150 hover:text-black dark:text-gray-300"
                 >
-                  <Trash2 className="w-4 h-4" aria-hidden />
+                  <Trash2 size={16} aria-hidden />
                 </button>
               </div>
             </div>
@@ -4056,7 +4075,7 @@ function DashboardPageContent() {
             className="w-full rounded px-3 py-2 text-left text-sm text-gray-800 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
             style={{ paddingLeft: `${12 + level * 16}px` }}
           >
-            <Folder className="w-4 h-4 mr-2 inline-block text-gray-600" aria-hidden />
+            <Folder size={16} className="mr-2 inline-block text-gray-600" aria-hidden />
             {folder.name}
           </button>
 
@@ -4787,23 +4806,10 @@ function DashboardPageContent() {
         className="relative box-border flex min-w-0 shrink-0 flex-col border-r border-gray-200 bg-white p-4"
         onDragOver={(e) => e.preventDefault()}
       >
-        <h1 className="mb-6 text-lg font-semibold text-gray-900">TradeShots</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">TradeShots</h1>
 
-        <button
-          type="button"
-          onClick={() => {
-            const name = prompt("Folder name");
-            if (!name) return;
-
-            void createFolder(name, activeFolderId);
-          }}
-          className="mb-4 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
-        >
-          <Plus className="w-4 h-4 mr-2 inline-block" aria-hidden />
-          New Folder
-        </button>
-
-        <div className="space-y-1">
+        <div className="space-y-4">
+        <div className="space-y-2">
           <button
             type="button"
             onClick={() => navigateDashboardView("marketplace")}
@@ -4824,12 +4830,12 @@ function DashboardPageContent() {
               aria-hidden
             />
             <span className="flex flex-1 items-center px-3 py-2">
-              <Compass className="mr-2 inline-block h-4 w-4 shrink-0" aria-hidden />
+              <Compass size={16} className="mr-2 inline-block shrink-0" aria-hidden />
               Marketplace
             </span>
           </button>
 
-          <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
+          <div className="border-t border-gray-200 dark:border-gray-700" />
 
           <button
             type="button"
@@ -4858,15 +4864,32 @@ function DashboardPageContent() {
             <span className="flex flex-1 items-center px-3 py-2">All Screenshots</span>
           </button>
 
+          <div className="flex items-center justify-between px-1 pt-1">
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Playbooks</p>
+            <button
+              type="button"
+              aria-label="Create new playbook folder"
+              onClick={() => {
+                const name = prompt("Folder name");
+                if (!name) return;
+                void createFolder(name, null);
+              }}
+              className="micro-btn inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <Plus size={16} aria-hidden />
+              New
+            </button>
+          </div>
+
           {topLevelFolders.length === 0 ? (
             <div className="rounded-lg border border-gray-200 bg-white px-3 py-6 text-center">
               <div className="mb-2 text-2xl" aria-hidden>
-                <Folder className="mx-auto w-5 h-5 text-gray-600" aria-hidden />
+                <Folder size={20} className="mx-auto text-gray-600" aria-hidden />
               </div>
-              <p className="text-sm font-semibold text-gray-900">
+              <p className="text-sm text-gray-700 dark:text-gray-300">
                 Create your first playbook
               </p>
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
                 Use “New Folder” or import a shared playbook to get started.
               </p>
             </div>
@@ -4874,13 +4897,12 @@ function DashboardPageContent() {
             <div className="space-y-2">{renderFolders(null, 0)}</div>
           )}
         </div>
+        </div>
 
         {activeFolderId && (
-          <div className="mt-4 border-t border-gray-100 pt-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Playbook description
-            </p>
-            <div className="mt-2">
+          <div className="space-y-2 border-t border-gray-100 pt-4">
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Playbook description</p>
+            <div>
               {editingDescription ? (
                 <textarea
                   value={description}
@@ -4906,7 +4928,7 @@ function DashboardPageContent() {
                       setEditingDescription(true);
                     }
                   }}
-                  className="cursor-pointer rounded-md p-1 text-sm text-gray-500 hover:bg-surface-muted"
+                  className="cursor-pointer rounded-md p-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-surface-muted"
                 >
                   {description || "Add description..."}
                 </p>
@@ -4947,10 +4969,10 @@ function DashboardPageContent() {
             <button
               type="button"
               onClick={() => setIsCommandOpen(true)}
-              className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-500 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
+              className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
             >
               <span>Search or jump to…</span>
-              <span className="text-xs text-gray-400">Ctrl + K</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Ctrl + K</span>
             </button>
           </div>
 
@@ -4966,7 +4988,7 @@ function DashboardPageContent() {
                 aria-haspopup="menu"
                 className="relative flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 bg-white text-base text-gray-600 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-black cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-300"
               >
-                <Bell className="w-5 h-5" aria-hidden />
+                <Bell size={20} aria-hidden />
                 {unreadNotificationCount > 0 && (
                   <span className="absolute -right-0.5 -top-0.5 min-w-[1.125rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-tight text-white">
                     {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
@@ -4976,7 +4998,7 @@ function DashboardPageContent() {
 
               {notificationsOpen && (
                 <div className="absolute right-0 z-50 mt-2 w-72 rounded-lg border border-default bg-surface shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
-                  <div className="border-b border-gray-100 p-3 text-sm font-medium text-gray-900">
+                  <div className="border-b border-gray-100 p-3 text-lg font-medium text-gray-800 dark:text-gray-200">
                     Notifications
                   </div>
 
@@ -4984,39 +5006,47 @@ function DashboardPageContent() {
                     {notifications.length === 0 ? (
                       <div className="px-3 py-4 text-center">
                         <div className="mx-auto mb-2 text-xl" aria-hidden>
-                          <Sparkles className="w-5 h-5 mx-auto text-gray-600" />
+                          <Sparkles size={20} className="mx-auto text-gray-600" />
                         </div>
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm text-gray-700 dark:text-gray-300">
                           You're all caught up
                         </p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          No new playbook updates right now.
+                        <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                          No new notifications right now.
                         </p>
                       </div>
                     ) : (
                       notifications.map((n) => {
                         const openable = canOpenPlaybookFromNotification(n);
+                        const markReadOnClick =
+                          (n.type === "comment" || n.type === "reply") &&
+                          !n.is_read;
+                        const clickable = openable || markReadOnClick;
                         return (
                           <div
                             key={n.id}
                             className={`border-b border-gray-100 last:border-b-0 ${
-                              openable
+                              clickable
                                 ? "cursor-pointer transition-all duration-150 ease-in-out hover:bg-gray-100"
                                 : ""
                             }`}
                           >
                             <button
                               type="button"
-                              disabled={!openable}
+                              disabled={!clickable}
                               onClick={() => {
-                                if (openable) void openPlaybookFromNotification(n);
+                                if (openable) {
+                                  void openPlaybookFromNotification(n);
+                                  return;
+                                }
+                                if (markReadOnClick) void markNotificationRead(n.id);
                               }}
                               className={`w-full p-3 text-left text-sm ${
                                 n.is_read
                                   ? "text-gray-500"
                                   : "font-medium text-gray-900"
                               } ${
-                                openable
+                                clickable
                                   ? "cursor-pointer transition-all duration-150 ease-in-out hover:bg-gray-100"
                                   : "cursor-default"
                               } disabled:cursor-default disabled:opacity-60`}
@@ -5032,9 +5062,9 @@ function DashboardPageContent() {
                                   {n.message ?? n.type ?? "Notification"}
                                 </span>
                                 {openable && (
-                                  <span className="shrink-0 inline-flex items-center gap-1 text-[10px] text-blue-600">
+                                  <span className="shrink-0 inline-flex items-center gap-2 text-[10px] text-blue-600">
                                     Open
-                                    <ChevronRight className="w-4 h-4" aria-hidden />
+                                    <ChevronRight size={16} aria-hidden />
                                   </span>
                                 )}
                               </div>
@@ -5051,7 +5081,7 @@ function DashboardPageContent() {
                       e.stopPropagation();
                       void markAllNotificationsRead();
                     }}
-                    className="w-full border-t border-gray-100 p-2 text-sm text-gray-600 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
+                    className="w-full border-t border-gray-100 p-2 text-sm font-medium text-gray-700 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
                   >
                     Mark all as read
                   </button>
@@ -5073,7 +5103,7 @@ function DashboardPageContent() {
               {isProfileOpen && (
                 <div className="absolute right-0 top-full z-50 mt-2 w-56 origin-top-right rounded-xl border border-default bg-surface p-2 shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
                   <div className="px-2 py-1">
-                    <p className="text-[11px] uppercase tracking-wide text-gray-500">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                       Signed in as
                     </p>
                     <p className="truncate text-sm text-gray-900">{email ?? ""}</p>
@@ -5081,7 +5111,7 @@ function DashboardPageContent() {
                   <div className="my-1 border-t border-gray-100" />
                   <button
                     type="button"
-                    className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm text-gray-500"
+                    className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-gray-700 dark:text-gray-300"
                     disabled
                   >
                     Account settings
@@ -5092,7 +5122,7 @@ function DashboardPageContent() {
                         <p className="text-sm font-medium text-gray-900">
                           {themeMode === "dark" ? "Dark mode" : "Light mode"}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                           {themeMode === "dark" ? "Switch to light" : "Switch to dark"}
                         </p>
                       </div>
@@ -5118,7 +5148,7 @@ function DashboardPageContent() {
                           }`}
                           aria-hidden
                         >
-                          <Sun className="h-4 w-4 text-gray-400" />
+                          <Sun size={16} className="text-gray-400" />
                         </span>
                         <span
                           className={`absolute right-2 transition-opacity duration-150 ${
@@ -5165,7 +5195,7 @@ function DashboardPageContent() {
 
           {checkingSession ? (
             <div className="py-20 text-center">
-              <p className="text-sm text-gray-600">Checking your session...</p>
+              <p className="text-sm text-gray-700 dark:text-gray-300">Checking your session...</p>
             </div>
           ) : (
             <AnimatePresence mode="wait">
@@ -5204,7 +5234,7 @@ function DashboardPageContent() {
                   transition={{ duration: 0.22, ease: "easeOut" }}
                 >
                   <div className="py-20 text-center">
-                    <p className="text-sm text-gray-600">Loading screenshots...</p>
+                    <p className="text-sm text-gray-700 dark:text-gray-300">Loading screenshots...</p>
                   </div>
                 </motion.div>
               ) : (
@@ -5218,7 +5248,7 @@ function DashboardPageContent() {
                 >
             <>
               <div className="mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">Your Screenshots</h2>
+                <h2 className="text-lg font-medium text-gray-800 dark:text-gray-200">Your Screenshots</h2>
               </div>
 
               <div className="mb-6">
@@ -5231,10 +5261,10 @@ function DashboardPageContent() {
               {screenshots.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="mb-2" aria-hidden>
-                    <Upload className="w-5 h-5 mx-auto text-gray-600" />
+                    <Upload size={20} className="mx-auto text-gray-600" />
                   </div>
-                  <p className="text-lg font-medium text-gray-900">No screenshots</p>
-                  <p className="mt-2 text-sm text-gray-600">
+                  <p className="text-lg font-medium text-gray-800 dark:text-gray-200">No screenshots</p>
+                  <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">
                     Drag & drop screenshots to get started
                   </p>
                 </div>
@@ -5265,7 +5295,7 @@ function DashboardPageContent() {
                         type="button"
                         onClick={() => applyView(view)}
                         className={`
-                          rounded-full px-3 py-1 text-sm transition
+                          micro-pill rounded-full px-3 py-1 text-sm transition
                           ${activeViewId === view.id
                             ? "bg-gray-900 text-white"
                             : "bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -5275,7 +5305,7 @@ function DashboardPageContent() {
                         {view.name}
                       </button>
 
-                      <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                      <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
                         <button
                           type="button"
                           onClick={() => {
@@ -5286,7 +5316,7 @@ function DashboardPageContent() {
                           }}
                           className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                         >
-                          <Pencil className="h-4 w-4 text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
+                          <Pencil size={16} className="text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
                         </button>
 
                         <button
@@ -5294,7 +5324,7 @@ function DashboardPageContent() {
                           onClick={() => void deleteView(view.id)}
                           className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
                         >
-                          <Trash2 className="h-4 w-4 text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
+                          <Trash2 size={16} className="text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
                         </button>
                       </div>
                     </div>
@@ -5310,16 +5340,16 @@ function DashboardPageContent() {
                       setSelectedKey("");
                       setSearchTerm("");
                     }}
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-200 cursor-pointer dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-700"
+                    className="micro-btn rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-200 cursor-pointer dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-700"
                   >
-                    <Plus className="mr-2 inline-block h-4 w-4 text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
+                    <Plus size={16} className="mr-2 inline-block text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
                     Add Filter
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSelectedIds(filteredScreenshots.map((s) => s.id))}
-                    className="text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                    className="text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-200"
                   >
                     Select All
                   </button>
@@ -5329,7 +5359,7 @@ function DashboardPageContent() {
                     onClick={() =>
                       setQuickFilters((prev) => ({ ...prev, voice: !prev.voice }))
                     }
-                    className={`rounded-full px-3 py-1 text-xs transition ${
+                    className={`micro-pill rounded-full px-3 py-1 text-sm font-medium transition ${
                       quickFilters.voice
                         ? "bg-blue-500 text-white"
                         : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
@@ -5345,7 +5375,7 @@ function DashboardPageContent() {
                         annotations: !prev.annotations,
                       }))
                     }
-                    className={`rounded-full px-3 py-1 text-xs transition ${
+                    className={`micro-pill rounded-full px-3 py-1 text-sm font-medium transition ${
                       quickFilters.annotations
                         ? "bg-blue-500 text-white"
                         : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
@@ -5358,7 +5388,7 @@ function DashboardPageContent() {
                     onClick={() =>
                       setQuickFilters((prev) => ({ ...prev, notes: !prev.notes }))
                     }
-                    className={`rounded-full px-3 py-1 text-xs transition ${
+                    className={`micro-pill rounded-full px-3 py-1 text-sm font-medium transition ${
                       quickFilters.notes
                         ? "bg-blue-500 text-white"
                         : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
@@ -5371,7 +5401,7 @@ function DashboardPageContent() {
                     onClick={() =>
                       setQuickFilters((prev) => ({ ...prev, favorites: !prev.favorites }))
                     }
-                    className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition ${
+                    className={`micro-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium transition ${
                       quickFilters.favorites
                         ? "bg-blue-500 text-white"
                         : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -5407,7 +5437,7 @@ function DashboardPageContent() {
                   {filters.map((f, index) => (
                     <div
                       key={`${f.key}-${f.value}-${index}`}
-                      className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs px-2 py-1 rounded-md flex items-center gap-2"
+                    className="micro-pill bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs px-2 py-1 rounded-md flex items-center gap-2"
                     >
                       <span className="font-medium">
                         {f.key}: {f.value}
@@ -5418,13 +5448,13 @@ function DashboardPageContent() {
                         className="text-gray-500 dark:text-gray-400 transition hover:text-gray-700 dark:hover:text-gray-200"
                         aria-label="Remove filter"
                       >
-                        <X className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
+                        <X size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
                       </button>
                     </div>
                   ))}
 
                   {quickFilters.voice && (
-                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
                       <span className="font-medium">Has Voice</span>
                       <button
                         type="button"
@@ -5434,12 +5464,12 @@ function DashboardPageContent() {
                         className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
                         aria-label="Remove voice filter"
                       >
-                        <X className="h-4 w-4" aria-hidden />
+                        <X size={16} aria-hidden />
                       </button>
                     </div>
                   )}
                   {quickFilters.annotations && (
-                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
                       <span className="font-medium">Has Annotations</span>
                       <button
                         type="button"
@@ -5449,12 +5479,12 @@ function DashboardPageContent() {
                         className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
                         aria-label="Remove annotations filter"
                       >
-                        <X className="h-4 w-4" aria-hidden />
+                        <X size={16} aria-hidden />
                       </button>
                     </div>
                   )}
                   {quickFilters.notes && (
-                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
                       <span className="font-medium">Has Notes</span>
                       <button
                         type="button"
@@ -5464,12 +5494,12 @@ function DashboardPageContent() {
                         className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
                         aria-label="Remove notes filter"
                       >
-                        <X className="h-4 w-4" aria-hidden />
+                        <X size={16} aria-hidden />
                       </button>
                     </div>
                   )}
                   {quickFilters.favorites && (
-                    <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
+                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
                       <span className="font-medium">Favorites</span>
                       <button
                         type="button"
@@ -5479,7 +5509,7 @@ function DashboardPageContent() {
                         className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
                         aria-label="Remove favorites filter"
                       >
-                        <X className="h-4 w-4" aria-hidden />
+                        <X size={16} aria-hidden />
                       </button>
                     </div>
                   )}
@@ -5647,7 +5677,7 @@ function DashboardPageContent() {
 
                         setSelectedIndex(index);
                       }}
-                      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border shadow-sm transition-all duration-150 ease-in-out hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-md ${
+                      className={`group micro-card relative flex h-full flex-col overflow-hidden rounded-xl border shadow-sm ${
                         highlightNew
                           ? "border-blue-400/75 bg-gradient-to-b from-blue-500/15 to-transparent shadow-[0_0_0_1px_rgba(59,130,246,0.12)] animate-card-highlight-new"
                           : highlightUpdated
@@ -5661,7 +5691,7 @@ function DashboardPageContent() {
                     >
                       {selectedIds.includes(shot.id) && (
                         <div className="absolute top-2 left-2 rounded bg-surface p-1 shadow">
-                          <Check className="w-4 h-4 text-green-600" aria-hidden />
+                          <Check size={16} className="text-green-600" aria-hidden />
                         </div>
                       )}
                       <button
@@ -5758,17 +5788,17 @@ function DashboardPageContent() {
                               <div className="mb-2.5 flex items-center gap-2">
                                 {hasAnnotation && (
                                   <span title="Has annotation">
-                                    <Pencil className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
+                                    <Pencil size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
                                   </span>
                                 )}
                                 {hasNote && (
                                   <span title="Has note">
-                                    <MessageSquare className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
+                                    <MessageSquare size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
                                   </span>
                                 )}
                                 {hasVoiceMemo && (
                                   <span title="Has voice memo">
-                                    <Mic className="h-4 w-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
+                                    <Mic size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
                                   </span>
                                 )}
                               </div>
@@ -5888,7 +5918,7 @@ function DashboardPageContent() {
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(false)}
-                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+                className="px-3 py-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300"
               >
                 Cancel
               </button>
@@ -5914,7 +5944,7 @@ function DashboardPageContent() {
               <button
                 type="button"
                 onClick={() => setFolderToDelete(null)}
-                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+                className="px-3 py-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300"
               >
                 Cancel
               </button>
@@ -5970,7 +6000,7 @@ function DashboardPageContent() {
 
             {isPaid && (
               <div className="mt-4">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                   Price (EUR)
                 </label>
                 <input
@@ -5993,7 +6023,7 @@ function DashboardPageContent() {
             )}
 
             <div className="mt-4">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                 Asset Type <span className="text-red-600">*</span>
               </label>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -6004,7 +6034,7 @@ function DashboardPageContent() {
                       key={`asset-${option}`}
                       type="button"
                       onClick={() => toggleShareMultiValue(setShareAssetTypes, option)}
-                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                      className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
                         selected
                           ? "border-gray-900 bg-gray-900 text-white"
                           : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
@@ -6018,7 +6048,7 @@ function DashboardPageContent() {
             </div>
 
             <div className="mt-4">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                 Timeframe <span className="text-red-600">*</span>
               </label>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -6029,7 +6059,7 @@ function DashboardPageContent() {
                       key={`timeframe-${option}`}
                       type="button"
                       onClick={() => setShareTimeframe(option)}
-                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                      className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
                         selected
                           ? "border-gray-900 bg-gray-900 text-white"
                           : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
@@ -6043,7 +6073,7 @@ function DashboardPageContent() {
             </div>
 
             <div className="mt-4">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                 Strategy Type
               </label>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -6054,7 +6084,7 @@ function DashboardPageContent() {
                       key={`strategy-${option}`}
                       type="button"
                       onClick={() => toggleShareMultiValue(setShareStrategyTypes, option)}
-                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                      className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
                         selected
                           ? "border-gray-900 bg-gray-900 text-white"
                           : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
@@ -6068,7 +6098,7 @@ function DashboardPageContent() {
             </div>
 
             <div className="mt-4">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                 Experience Level <span className="text-red-600">*</span>
               </label>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -6079,7 +6109,7 @@ function DashboardPageContent() {
                       key={`experience-${option}`}
                       type="button"
                       onClick={() => setShareExperienceLevel(option)}
-                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                      className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
                         selected
                           ? "border-gray-900 bg-gray-900 text-white"
                           : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
@@ -6093,7 +6123,7 @@ function DashboardPageContent() {
             </div>
 
             <div className="mt-4">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                 Cover Image (optional)
               </label>
               <div className="mt-2 rounded-lg border border-gray-300 bg-white p-2">
@@ -6108,7 +6138,7 @@ function DashboardPageContent() {
                 />
               </div>
               <div className="mt-2 flex items-center gap-2">
-                <label className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700 hover:bg-gray-100">
+                <label className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-100">
                   {shareCoverUploading ? "Uploading..." : "Upload / Replace"}
                   <input
                     type="file"
@@ -6128,7 +6158,7 @@ function DashboardPageContent() {
                   <button
                     type="button"
                     onClick={() => setShareCoverUrl(null)}
-                    className="text-sm text-gray-600 hover:text-gray-900"
+                    className="text-sm font-medium text-gray-700 hover:text-gray-900"
                   >
                     Use first screenshot
                   </button>
@@ -6140,7 +6170,7 @@ function DashboardPageContent() {
               <button
                 type="button"
                 onClick={() => closeShareModal()}
-                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+                className="px-3 py-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300"
                 disabled={shareSaving}
               >
                 Cancel
@@ -6210,7 +6240,7 @@ function DashboardPageContent() {
                 hover:bg-black/60
               "
             >
-              <ChevronLeft className="w-5 h-5" aria-hidden />
+              <ChevronLeft size={20} aria-hidden />
             </button>
           )}
 
@@ -6241,7 +6271,7 @@ function DashboardPageContent() {
                   hover:bg-black/60
                 "
               >
-                <ChevronRight className="w-5 h-5" aria-hidden />
+                <ChevronRight size={20} aria-hidden />
               </button>
             )}
 
@@ -6259,7 +6289,7 @@ function DashboardPageContent() {
               transition
             "
           >
-            <X className="w-5 h-5" aria-hidden />
+            <X size={20} aria-hidden />
           </button>
 
           {/* Image */}
@@ -6415,9 +6445,9 @@ function DashboardPageContent() {
                   className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30"
                 >
                   {isAnnotationToolbarOpen ? (
-                    <PanelRightClose className="h-4 w-4" aria-hidden />
+                    <PanelRightClose size={16} aria-hidden />
                   ) : (
-                    <PanelRightOpen className="h-4 w-4" aria-hidden />
+                    <PanelRightOpen size={16} aria-hidden />
                   )}
                 </button>
 
@@ -6434,7 +6464,7 @@ function DashboardPageContent() {
                           : "border-gray-300 bg-white text-gray-700"
                       }`}
                     >
-                      <MousePointer2 className="h-4 w-4" aria-hidden />
+                      <MousePointer2 size={16} aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -6447,7 +6477,7 @@ function DashboardPageContent() {
                           : "border-gray-300 bg-white text-gray-700"
                       }`}
                     >
-                      <Pencil className="h-4 w-4" aria-hidden />
+                      <Pencil size={16} aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -6460,7 +6490,7 @@ function DashboardPageContent() {
                           : "border-gray-300 bg-white text-gray-700"
                       }`}
                     >
-                      <Minus className="h-4 w-4" aria-hidden />
+                      <Minus size={16} aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -6473,7 +6503,7 @@ function DashboardPageContent() {
                           : "border-gray-300 bg-white text-gray-700"
                       }`}
                     >
-                      <ArrowRight className="h-4 w-4" aria-hidden />
+                      <ArrowRight size={16} aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -6486,7 +6516,7 @@ function DashboardPageContent() {
                           : "border-gray-300 bg-white text-gray-700"
                       }`}
                     >
-                      <Type className="h-4 w-4" aria-hidden />
+                      <Type size={16} aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -6499,14 +6529,14 @@ function DashboardPageContent() {
                           : "border-gray-300 bg-white text-gray-700"
                       }`}
                     >
-                      <Square className="h-4 w-4" aria-hidden />
+                      <Square size={16} aria-hidden />
                     </button>
                     <label
                       title="Color"
                       aria-label="Color"
                       className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus-within:ring-2 focus-within:ring-gray-400/30"
                     >
-                      <Palette className="absolute h-4 w-4 opacity-70" aria-hidden />
+                      <Palette size={16} className="absolute opacity-70" aria-hidden />
                       <input
                         type="color"
                         value={strokeColor}
@@ -6522,7 +6552,7 @@ function DashboardPageContent() {
                         onClick={() => setShowStrokeSizePopover((prev) => !prev)}
                         className="relative flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30"
                       >
-                        <SlidersHorizontal className="h-4 w-4 opacity-70" aria-hidden />
+                        <SlidersHorizontal size={16} className="opacity-70" aria-hidden />
                       </button>
                       {showStrokeSizePopover && (
                         <div className="absolute left-[42px] top-1/2 z-30 w-44 -translate-y-1/2 rounded-md border border-gray-300 bg-white p-2 shadow-lg">
@@ -6549,7 +6579,7 @@ function DashboardPageContent() {
                       disabled={annotationHistoryIndex <= 0}
                       className="mt-1 flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
                     >
-                      <Undo2 className="h-4 w-4" aria-hidden />
+                      <Undo2 size={16} aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -6562,7 +6592,7 @@ function DashboardPageContent() {
                       }
                       className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
                     >
-                      <Redo2 className="h-4 w-4" aria-hidden />
+                      <Redo2 size={16} aria-hidden />
                     </button>
                   </div>
                 )}
@@ -6573,12 +6603,12 @@ function DashboardPageContent() {
                       title={`Active tool: ${tool === "highlight" ? "Rectangle" : tool}`}
                       className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-900 bg-gray-900 text-white shadow-sm"
                     >
-                      {tool === "select" && <MousePointer2 className="h-4 w-4" aria-hidden />}
-                      {tool === "draw" && <Pencil className="h-4 w-4" aria-hidden />}
-                      {tool === "line" && <Minus className="h-4 w-4" aria-hidden />}
-                      {tool === "arrow" && <ArrowRight className="h-4 w-4" aria-hidden />}
-                      {tool === "text" && <Type className="h-4 w-4" aria-hidden />}
-                      {tool === "highlight" && <Square className="h-4 w-4" aria-hidden />}
+                      {tool === "select" && <MousePointer2 size={16} aria-hidden />}
+                      {tool === "draw" && <Pencil size={16} aria-hidden />}
+                      {tool === "line" && <Minus size={16} aria-hidden />}
+                      {tool === "arrow" && <ArrowRight size={16} aria-hidden />}
+                      {tool === "text" && <Type size={16} aria-hidden />}
+                      {tool === "highlight" && <Square size={16} aria-hidden />}
                     </div>
                     <button
                       type="button"
@@ -6588,7 +6618,7 @@ function DashboardPageContent() {
                       disabled={annotationHistoryIndex <= 0}
                       className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
                     >
-                      <Undo2 className="h-4 w-4" aria-hidden />
+                      <Undo2 size={16} aria-hidden />
                     </button>
                     <button
                       type="button"
@@ -6601,13 +6631,13 @@ function DashboardPageContent() {
                       }
                       className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/30 disabled:opacity-50"
                     >
-                      <Redo2 className="h-4 w-4" aria-hidden />
+                      <Redo2 size={16} aria-hidden />
                     </button>
                   </div>
                 )}
 
                 {showStrokeSizePopover && !isAnnotationToolbarOpen && (
-                  <div className="mt-2 text-[10px] text-gray-500">{`Size ${strokeSize}`}</div>
+                  <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{`Size ${strokeSize}`}</div>
                 )}
               </div>
 
@@ -6617,7 +6647,7 @@ function DashboardPageContent() {
               >
                 <div className="mb-4 flex items-center justify-between">
                   {isPanelOpen && (
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                       Details
                     </p>
                   )}
@@ -6628,16 +6658,16 @@ function DashboardPageContent() {
                     className="flex h-9 w-9 items-center justify-center rounded-md bg-white/0 text-gray-600 transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900 cursor-pointer"
                   >
                     {isPanelOpen ? (
-                      <ChevronRight className="w-4 h-4" aria-hidden />
+                      <ChevronRight size={16} aria-hidden />
                     ) : (
-                      <ChevronLeft className="w-4 h-4" aria-hidden />
+                      <ChevronLeft size={16} aria-hidden />
                     )}
                   </button>
                 </div>
 
                 {isPanelOpen && (
                   <div className="space-y-6">
-                    <div className="mb-2 space-y-2 rounded-lg border border-gray-200 bg-white p-2 text-xs text-gray-600">
+                    <div className="mb-2 space-y-2 rounded-lg border border-gray-200 bg-white p-2 text-sm text-gray-700 dark:text-gray-300">
                       <div className="flex items-center justify-between">
                         <span>Tool</span>
                         <span className="font-medium text-gray-900">
@@ -6645,7 +6675,7 @@ function DashboardPageContent() {
                         </span>
                       </div>
                       {savingAnnotation && (
-                        <div className="text-[11px] text-gray-500">Saving annotations...</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Saving annotations...</div>
                       )}
                       <div className="flex items-center justify-between">
                         <span>Size</span>
@@ -6676,7 +6706,7 @@ function DashboardPageContent() {
                           type="button"
                           onClick={applyTextDraft}
                           disabled={!textDraft || !textDraft.text.trim()}
-                          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Add text
                         </button>
@@ -6698,21 +6728,21 @@ function DashboardPageContent() {
                         <button
                           type="button"
                           onClick={() => void exportMergedImage()}
-                          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700"
+                          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm font-medium text-gray-700"
                         >
                           Export merged
                         </button>
                       </div>
                     </div>
                     {tool === "select" && (
-                      <p className="text-xs text-gray-500">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
                         Hover to highlight, click to select, then drag to move.
                       </p>
                     )}
 
                     {/* ATTRIBUTES */}
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
                         Attributes
                       </p>
 
@@ -6769,7 +6799,7 @@ function DashboardPageContent() {
                               onClick={() => handleDeleteAttribute(index)}
                               className="shrink-0 text-sm text-gray-400 opacity-0 transition hover:text-red-500 group-hover:opacity-100"
                             >
-                              <Trash2 className="w-4 h-4" aria-hidden />
+                              <Trash2 size={16} aria-hidden />
                             </button>
                           </div>
                         ))}
@@ -6792,19 +6822,19 @@ function DashboardPageContent() {
                       </button>
 
                       {savedAttributesToast && (
-                        <div className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-green-700">
-                          <Check className="w-4 h-4" aria-hidden />
+                        <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-green-700">
+                          <Check size={16} aria-hidden />
                           Saved
                         </div>
                       )}
                       {savingAttributes && (
-                        <div className="mt-2 text-xs text-gray-500">Saving attributes...</div>
+                        <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">Saving attributes...</div>
                       )}
                     </div>
 
                     {/* NOTES */}
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
                         Notes
                       </p>
                       <textarea
@@ -6815,22 +6845,22 @@ function DashboardPageContent() {
                       />
 
                       {savedNoteToast && (
-                        <div className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-green-700">
-                          <Check className="w-4 h-4" aria-hidden />
+                        <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-green-700">
+                          <Check size={16} aria-hidden />
                           Saved
                         </div>
                       )}
                       {savingNote && (
-                        <div className="mt-2 text-xs text-gray-500">Saving note...</div>
+                        <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">Saving note...</div>
                       )}
 
                       <div className="mt-5 border-t border-gray-200 pt-4">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                             Voice Memo
                           </p>
                           {(hasPrivateMemo || selectedImage?.voice_memo_url) && (
-                            <span className="text-[11px] text-gray-500">
+                            <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                               {hasPrivateMemo ? "Private memo" : "Source memo"}
                               {formatVoiceMemoDuration(effectiveVoiceMemoDuration)
                                 ? ` • ${formatVoiceMemoDuration(effectiveVoiceMemoDuration)}`
@@ -6839,7 +6869,7 @@ function DashboardPageContent() {
                           )}
                         </div>
                         {isRecordingVoiceMemo && (
-                          <p className="mt-1 text-[11px] text-red-500">
+                          <p className="mt-1 text-xs text-red-500">
                             Recording... {formatVoiceMemoDuration(recordingElapsedMs) ?? "0:00"}
                           </p>
                         )}
@@ -6857,7 +6887,7 @@ function DashboardPageContent() {
                         )}
 
                         <div className="mt-2 grid grid-cols-1 gap-2">
-                          <label className="text-[11px] text-gray-500">
+                          <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                             Recording source
                             <select
                               value={selectedInputDeviceId}
@@ -6875,7 +6905,7 @@ function DashboardPageContent() {
                             </select>
                           </label>
 
-                          <label className="text-[11px] text-gray-500">
+                          <label className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                             Playback output
                             <select
                               value={selectedOutputDeviceId}
@@ -6904,7 +6934,7 @@ function DashboardPageContent() {
                                   : void startVoiceMemoRecording("source")
                               }
                               disabled={savingVoiceMemo}
-                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                              className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-60"
                             >
                               {isRecordingVoiceMemo ? (
                                 <>
@@ -6929,7 +6959,7 @@ function DashboardPageContent() {
                                   : void startVoiceMemoRecording("private")
                               }
                               disabled={savingVoiceMemo}
-                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                              className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-60"
                             >
                               {isRecordingVoiceMemo ? (
                                 <>
@@ -6958,7 +6988,7 @@ function DashboardPageContent() {
                                   void audio.play();
                                 }
                               }}
-                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+                              className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
                             >
                               {isPlayingVoiceMemo ? (
                                 <>
@@ -6991,7 +7021,7 @@ function DashboardPageContent() {
                                   )
                                   .finally(() => setSavingVoiceMemo(false));
                               }}
-                              className="inline-flex items-center gap-1 rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
+                              className="inline-flex items-center gap-2 rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
                             >
                               <Trash2 className="h-3.5 w-3.5" aria-hidden />
                               Delete source
@@ -7015,7 +7045,7 @@ function DashboardPageContent() {
                                   )
                                   .finally(() => setSavingVoiceMemo(false));
                               }}
-                              className="inline-flex items-center gap-1 rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
+                              className="inline-flex items-center gap-2 rounded-md border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
                             >
                               <Trash2 className="h-3.5 w-3.5" aria-hidden />
                               Delete private
@@ -7052,7 +7082,7 @@ function DashboardPageContent() {
                 right: `clamp(1rem, calc(${panelWidth + annotationToolbarWidth}px + 1rem), calc(100vw - 3rem))`,
               }}
             >
-              <X className="w-5 h-5" aria-hidden />
+              <X size={20} aria-hidden />
             </button>
 
             {selectedIndex !== null && selectedIndex! > 0 && (
@@ -7072,7 +7102,7 @@ function DashboardPageContent() {
                   group-hover:opacity-100
                 "
               >
-                <ChevronLeft className="w-5 h-5" aria-hidden />
+                <ChevronLeft size={20} aria-hidden />
               </button>
             )}
 
@@ -7099,7 +7129,7 @@ function DashboardPageContent() {
                     right: `clamp(1rem, calc(${panelWidth + annotationToolbarWidth}px + 1rem), calc(100vw - 3rem))`,
                   }}
                 >
-                  <ChevronRight className="w-5 h-5" aria-hidden />
+                  <ChevronRight size={20} aria-hidden />
                 </button>
               )}
 
@@ -7172,7 +7202,7 @@ function DashboardPageContent() {
 
             <div className="max-h-80 overflow-y-auto">
               {commandViewResults.length > 0 && (
-                <div className="border-b border-gray-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <div className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                   Saved Views
                 </div>
               )}
@@ -7196,7 +7226,7 @@ function DashboardPageContent() {
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
-                      <Search className="w-4 h-4 text-gray-600" aria-hidden />
+                      <Search size={16} className="text-gray-600" aria-hidden />
                       {view.name}
                     </span>
                   </div>
@@ -7204,7 +7234,7 @@ function DashboardPageContent() {
               })}
 
               {commandScreenshotResults.length > 0 && (
-                <div className="border-b border-t border-gray-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <div className="border-b border-t border-gray-100 px-4 py-2 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                   Screenshots
                 </div>
               )}

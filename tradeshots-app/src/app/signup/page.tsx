@@ -45,7 +45,7 @@ export default function SignupPage() {
       <div className="flex w-full max-w-md flex-col items-center gap-4">
         <AuthForm mode="signup" />
 
-        <p className="text-center text-sm text-gray-600">
+        <p className="app-body text-center">
           Already have an account?{" "}
           <Link
             className="font-medium text-gray-900 underline underline-offset-4 hover:text-gray-700"

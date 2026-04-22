@@ -95,7 +95,7 @@ export default function UpdatePasswordPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
         <div className="w-full max-w-md rounded-xl border border-default bg-surface p-6 shadow-sm">
-          <p className="text-sm text-zinc-600">Checking your session...</p>
+          <p className="app-body">Checking your session...</p>
         </div>
       </main>
     );
@@ -105,7 +105,7 @@ export default function UpdatePasswordPage() {
     <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="mx-auto w-full max-w-md">
         <div className="rounded-2xl border border-default bg-surface p-8 shadow-md">
-          <h1 className="mb-6 text-2xl font-bold text-gray-900">
+          <h1 className="app-page-title mb-6">
             Update password
           </h1>
 
@@ -118,7 +118,7 @@ export default function UpdatePasswordPage() {
           <form className="flex flex-col gap-4" onSubmit={handleUpdatePassword}>
             <div className="flex flex-col gap-1">
               <label
-                className="text-sm font-medium text-gray-700"
+                className="app-label-meta"
                 htmlFor="newPassword"
               >
                 New password
@@ -137,7 +137,7 @@ export default function UpdatePasswordPage() {
 
             <div className="flex flex-col gap-1">
               <label
-                className="text-sm font-medium text-gray-700"
+                className="app-label-meta"
                 htmlFor="confirmPassword"
               >
                 Confirm password
@@ -169,7 +169,7 @@ export default function UpdatePasswordPage() {
             <button
               type="submit"
               disabled={!canSubmit || updating}
-              className="mt-2 h-11 rounded-lg bg-black px-4 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-60"
+              className="app-button-text mt-2 h-11 rounded-lg bg-black px-4 text-white transition hover:bg-gray-800 disabled:opacity-60"
             >
               {updating ? "Updating..." : "Update password"}
             </button>

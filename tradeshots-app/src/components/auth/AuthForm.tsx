@@ -130,13 +130,13 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
   return (
     <div className="mx-auto w-full max-w-md">
       <div className="rounded-2xl border border-default bg-surface p-8 shadow-md">
-        <h1 className="mb-6 text-3xl font-semibold text-gray-900">
+        <h1 className="app-page-title mb-6">
           {isSignup ? "Create your account" : "Welcome back"}
         </h1>
 
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700" htmlFor="email">
+            <label className="app-label-meta" htmlFor="email">
               Email
             </label>
             <input
@@ -153,7 +153,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
 
           <div className="flex flex-col gap-1">
             <label
-              className="text-sm font-medium text-gray-700"
+              className="app-label-meta"
               htmlFor="password"
             >
               Password
@@ -176,9 +176,9 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? (
-                  <EyeOff className="h-5 w-5" aria-hidden />
+                  <EyeOff size={20} aria-hidden />
                 ) : (
-                  <Eye className="h-5 w-5" aria-hidden />
+                  <Eye size={20} aria-hidden />
                 )}
               </button>
             </div>
@@ -188,7 +188,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
             <div className="mt-1 flex justify-end">
               <Link
                 href="/reset-password"
-                className="text-sm text-gray-600 hover:text-black"
+                className="app-button-text text-gray-700 hover:text-black"
               >
                 Forgot password?
               </Link>
@@ -198,7 +198,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
           {isSignup && (
             <div className="flex flex-col gap-1">
               <label
-                className="text-sm font-medium text-gray-700"
+                className="app-label-meta"
                 htmlFor="confirmPassword"
               >
                 Confirm password
@@ -223,9 +223,9 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
                   }
                 >
                   {showConfirmPassword ? (
-                    <EyeOff className="h-5 w-5" aria-hidden />
+                    <EyeOff size={20} aria-hidden />
                   ) : (
-                    <Eye className="h-5 w-5" aria-hidden />
+                    <Eye size={20} aria-hidden />
                   )}
                 </button>
               </div>
@@ -242,7 +242,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
                 type="button"
                 disabled={resendLoading}
                 onClick={handleResendEmail}
-                className="mt-3 inline-flex h-10 items-center justify-center rounded-lg bg-black px-4 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-60"
+                className="app-button-text mt-3 inline-flex h-10 items-center justify-center rounded-lg bg-black px-4 text-white transition hover:bg-gray-800 disabled:opacity-60"
               >
                 {resendLoading ? "Resending..." : "Resend email"}
               </button>
@@ -270,7 +270,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 h-11 rounded-lg bg-black px-4 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-60"
+            className="app-button-text mt-2 h-11 rounded-lg bg-black px-4 text-white transition hover:bg-gray-800 disabled:opacity-60"
           >
             {loading ? "Please wait..." : isSignup ? "Sign up" : "Log in"}
           </button>

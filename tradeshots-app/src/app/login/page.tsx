@@ -77,10 +77,10 @@ function LoginPageInner() {
           type="button"
           onClick={handleGoogleLogin}
           disabled={oauthLoading}
-          className="group flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-900 transition hover:bg-gray-100 disabled:opacity-60"
+          className="app-button-text group flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-gray-900 transition hover:bg-gray-100 disabled:opacity-60"
         >
-          <span aria-hidden="true" className="inline-flex h-5 w-5 items-center justify-center">
-            <Globe className="h-5 w-5 text-gray-600 transition-colors group-hover:text-black" aria-hidden />
+          <span aria-hidden="true" className="inline-flex items-center justify-center">
+            <Globe size={20} className="text-gray-600 transition-colors group-hover:text-black" aria-hidden />
           </span>
           {oauthLoading ? "Starting..." : "Continue with Google"}
         </button>
@@ -93,7 +93,7 @@ function LoginPageInner() {
 
         <AuthForm mode="login" />
 
-        <p className="text-center text-sm text-gray-600">
+        <p className="app-body text-center">
           Don&apos;t have an account?{" "}
           <Link
             className="font-medium text-gray-900 underline underline-offset-4 hover:text-gray-700"

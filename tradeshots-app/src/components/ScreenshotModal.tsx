@@ -10,6 +10,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { motion } from "framer-motion";
+import { createPortal } from "react-dom";
 
 export type AnnotationShape =
   | {
@@ -324,16 +326,30 @@ export default function ScreenshotModal({
   const effectiveDuration =
     screenshot.private_voice_memo_duration_ms ?? screenshot.voice_memo_duration_ms ?? null;
   const hasPrivateMemo = Boolean(screenshot.private_voice_memo_url);
+  const hasAnyDetails =
+    Boolean(screenshot.tags && screenshot.tags.length > 0) ||
+    Boolean(screenshot.notes) ||
+    Boolean(effectiveVoiceMemoUrl) ||
+    Boolean(screenshot.attributes && screenshot.attributes.length > 0);
 
-  return (
-    <div className="fixed inset-0 z-50 flex bg-black/40 backdrop-blur-sm transition-opacity duration-150 ease-in-out">
+  const modalContent = (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+    >
       <div
         className="absolute inset-0 z-0 cursor-pointer"
         onClick={() => setIndex(null)}
       />
 
-      <div
-        className="relative z-10 flex min-h-0 min-w-0 h-full w-full overflow-hidden rounded-2xl border border-default bg-surface shadow-xl animate-[fadeIn_0.2s_ease-out_both]"
+      <motion.div
+        className="group relative z-10 flex h-[96dvh] min-h-0 min-w-0 w-[98vw] max-w-none overflow-hidden rounded-xl bg-gray-900 shadow-2xl"
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.15, ease: "easeOut" }}
         role="dialog"
         aria-modal="true"
       >
@@ -341,107 +357,159 @@ export default function ScreenshotModal({
           type="button"
           onClick={() => setIndex(null)}
           aria-label="Close modal"
-          className="absolute right-4 top-4 z-50 flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-white/30"
+          className="micro-btn absolute right-4 top-4 z-30 flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white transition-all duration-150 ease-in-out hover:bg-white hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-white/30"
         >
-          <X className="w-5 h-5" aria-hidden />
+          <X size={20} aria-hidden />
         </button>
 
-        {/* LEFT: image + annotation canvas */}
-        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
-          <div className="relative flex h-full min-h-0 w-full items-center justify-center p-4">
-            <div className="relative inline-block max-h-full max-w-full">
-              <img
-                ref={imgRef}
-                src={screenshot.image_url}
-                alt=""
-                draggable={false}
-                className="block max-h-[calc(100vh-24px)] max-w-[calc(100vw-460px)] w-auto object-contain"
-              />
-              <canvas
-                ref={canvasRef}
-                className="pointer-events-none absolute inset-0 h-full w-full"
-              />
-            </div>
+        <div className="absolute left-0 right-0 top-0 z-20 group">
+          <div className="flex items-center justify-between bg-black/40 px-4 py-2 text-white backdrop-blur-sm">
+          <div className="w-5" />
+
+          <div className="text-sm opacity-80">
+            {index + 1} / {screenshots.length}
           </div>
 
-          {canPrev && (
-            <button
-              type="button"
-              onClick={() => setIndex((i) => (i === null ? 0 : i - 1))}
-              className="absolute left-4 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900"
-            >
-              <ChevronLeft className="w-5 h-5" aria-hidden />
-            </button>
-          )}
-          {canNext && (
-            <button
-              type="button"
-              onClick={() => setIndex((i) => (i === null ? 0 : i + 1))}
-              className="absolute right-4 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-md bg-black/30 p-2 text-white transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-gray-900"
-            >
-              <ChevronRight className="w-5 h-5" aria-hidden />
-            </button>
-          )}
+          <div className="w-5" />
+          </div>
         </div>
 
-        {/* RIGHT: read-only details */}
-        <div className="w-[380px] shrink-0 overflow-y-auto border-l border-default bg-surface-muted p-6">
-          <div className="mb-5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Details
-            </p>
+        <div className="flex h-full w-full pt-10">
+          {/* LEFT: image + annotation canvas */}
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
+            <div className="group relative flex h-full min-h-0 flex-1 items-center justify-center bg-black p-6">
+              <div className="relative inline-block max-h-full max-w-full">
+                <img
+                  ref={imgRef}
+                  src={screenshot.image_url}
+                  alt=""
+                  draggable={false}
+                  className="block max-h-[90%] max-w-[95%] w-auto object-contain transition-transform duration-200 ease-out group-hover:scale-[1.01]"
+                />
+                <canvas
+                  ref={canvasRef}
+                  className="pointer-events-none absolute inset-0 h-full w-full"
+                />
+              </div>
+            </div>
+
+            {canPrev ? (
+              <button
+                type="button"
+                onClick={() => setIndex((i) => (i === null ? 0 : Math.max(0, i - 1)))}
+                className="micro-btn absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-2 text-white opacity-0 transition-all duration-150 group-hover:opacity-100 hover:opacity-100"
+                aria-label="Previous screenshot"
+              >
+                <ChevronLeft size={20} />
+              </button>
+            ) : null}
+
+            {canNext ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setIndex((i) => (i === null ? 0 : Math.min(screenshots.length - 1, i + 1)))
+                }
+                className="micro-btn absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-black/40 p-2 text-white opacity-0 transition-all duration-150 group-hover:opacity-100 hover:opacity-100"
+                aria-label="Next screenshot"
+              >
+                <ChevronRight size={20} />
+              </button>
+            ) : null}
           </div>
 
-          <div className="space-y-2">
-            {screenshot.tags && screenshot.tags.length > 0 && (
-              <div className="text-sm text-gray-700">
-                <span className="font-medium">Tags:</span> {screenshot.tags.join(", ")}
+          {/* RIGHT: read-only details */}
+          <div className="w-[300px] shrink-0 overflow-y-auto scroll-smooth space-y-6 border-l border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                Screenshot Details
+              </p>
+            </div>
+
+            {!hasAnyDetails ? (
+              <div className="rounded-xl border border-dashed border-gray-300 bg-white px-3 py-4 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                No details available for this screenshot yet.
               </div>
-            )}
-            {screenshot.notes && (
-              <div className="text-sm text-gray-700">
-                <span className="font-medium">Notes:</span> {screenshot.notes}
-              </div>
-            )}
-            {effectiveVoiceMemoUrl && (
-              <div className="pt-1">
-                <div className="mb-1 text-sm text-gray-700">
-                  <span className="font-medium">Voice memo:</span>{" "}
-                  {hasPrivateMemo ? "Private" : "Source"}
-                  {formatVoiceDuration(effectiveDuration)
-                    ? ` (${formatVoiceDuration(effectiveDuration)})`
-                    : ""}
-                </div>
-                <audio controls src={effectiveVoiceMemoUrl} className="voice-memo-audio w-full" />
-                {readOnly && screenshot.source_screenshot_id && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Playback only in shared/imported view.
+            ) : null}
+
+            <div className="space-y-4">
+              {screenshot.tags && screenshot.tags.length > 0 ? (
+                <section className="space-y-2 rounded-xl bg-gray-50 p-4 shadow-sm dark:bg-gray-800">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                    Tags
                   </p>
-                )}
-              </div>
-            )}
-          </div>
+                  <div className="flex flex-wrap gap-2">
+                    {screenshot.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="micro-pill rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
 
-          <div className="mt-4 space-y-1">
-            {(screenshot.attributes ?? []).map((attr, i) => (
-              <div key={i} className="text-sm text-gray-700">
-                <span className="font-medium">{attr.name}:</span> {attr.value}
-              </div>
-            ))}
-            {(!screenshot.attributes || screenshot.attributes.length === 0) && (
-              <div className="text-sm text-gray-500">No attributes yet</div>
-            )}
-          </div>
+              <section className="space-y-2 rounded-xl bg-gray-50 p-4 shadow-sm dark:bg-gray-800">
+                <p className="text-lg font-medium text-gray-800 dark:text-gray-200">Notes</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {screenshot.notes || "No notes"}
+                </p>
+              </section>
 
-          {/* read-only: no editing UI */}
-          {!readOnly && (
-            <div className="mt-6 text-sm text-gray-600">
-              Editing is not implemented in this component.
+              {effectiveVoiceMemoUrl ? (
+                <section className="space-y-2 rounded-xl bg-gray-50 p-4 shadow-sm dark:bg-gray-800">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                    Voice Memo
+                  </p>
+                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                    {hasPrivateMemo ? "Private" : "Source"}
+                    {formatVoiceDuration(effectiveDuration)
+                      ? ` • ${formatVoiceDuration(effectiveDuration)}`
+                      : ""}
+                  </p>
+                  <audio controls src={effectiveVoiceMemoUrl} className="voice-memo-audio w-full" />
+                  {readOnly && screenshot.source_screenshot_id ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                      Playback only in shared/imported view.
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
+
+              <section className="space-y-2 rounded-xl bg-gray-50 p-4 shadow-sm dark:bg-gray-800">
+                <p className="text-lg font-medium text-gray-800 dark:text-gray-200">Attributes</p>
+                <div className="flex flex-wrap gap-2">
+                  {screenshot.attributes && screenshot.attributes.length > 0 ? (
+                    screenshot.attributes.map((attr, i) => (
+                      <span
+                        key={`${attr.name}-${i}`}
+                        className="micro-pill rounded-full bg-gray-200 px-2 py-1 text-sm text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                      >
+                        {attr.name}: {attr.value}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-gray-700 dark:text-gray-300">No attributes</span>
+                  )}
+                </div>
+              </section>
             </div>
-          )}
+
+            {/* read-only: no editing UI */}
+            {!readOnly && (
+              <div className="text-sm text-gray-700 dark:text-gray-300">
+                Editing is not implemented in this component.
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
+
+  if (typeof document === "undefined") return null;
+  return createPortal(modalContent, document.body);
 }
 

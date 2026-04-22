@@ -43,13 +43,13 @@ export default function ResetPasswordPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="w-full max-w-md rounded-2xl border border-default bg-surface p-8 shadow-md">
-        <h1 className="mb-6 text-2xl font-bold text-gray-900">
+        <h1 className="app-page-title mb-6">
           Reset password
         </h1>
 
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700" htmlFor="email">
+            <label className="app-label-meta" htmlFor="email">
               Email
             </label>
             <input
@@ -79,7 +79,7 @@ export default function ResetPasswordPage() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 h-11 rounded-lg bg-black px-4 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-60"
+            className="app-button-text mt-2 h-11 rounded-lg bg-black px-4 text-white transition hover:bg-gray-800 disabled:opacity-60"
           >
             {loading ? "Sending..." : "Send reset link"}
           </button>

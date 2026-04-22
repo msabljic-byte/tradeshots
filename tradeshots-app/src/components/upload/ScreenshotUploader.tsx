@@ -234,7 +234,7 @@ export default function ScreenshotUploader({
                 onClick={() => removeTag(tag)}
                 className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gray-300 text-[10px] leading-none text-gray-600 transition-colors duration-150 ease-in-out hover:bg-gray-100 hover:text-black cursor-pointer"
               >
-                <X className="w-4 h-4" aria-hidden />
+                <X size={16} aria-hidden />
               </button>
             </span>
           ))}
@@ -268,7 +268,7 @@ export default function ScreenshotUploader({
           />
         </div>
       </div>
-      <p className="mb-4 text-xs text-gray-500">example: breakout, reversal, fakeout</p>
+      <p className="mb-4 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">example: breakout, reversal, fakeout</p>
 
       <input
         ref={fileInputRef}
@@ -300,17 +300,17 @@ ${isDragActive
 ${isUploading ? "pointer-events-none opacity-50" : ""}
 `.trim()}
       >
-        <p className="text-lg font-semibold text-gray-900">
+        <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
           Drag & drop your screenshot
         </p>
-        <p className="mt-2 text-sm text-gray-600">or click to upload</p>
-        <p className="mt-1 text-xs text-gray-600">or paste screenshot (Ctrl + V)</p>
+        <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">or click to upload</p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">or paste screenshot (Ctrl + V)</p>
 
         {isUploading && (
-          <p className="mt-4 text-sm font-medium text-gray-600">Uploading...</p>
+          <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">Uploading...</p>
         )}
         {isPasting && (
-          <p className="mt-2 text-sm font-medium text-gray-600">Pasting screenshot...</p>
+          <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Pasting screenshot...</p>
         )}
       </div>
 
