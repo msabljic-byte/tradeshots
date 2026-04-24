@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Globe } from "lucide-react";
 import AuthForm from "@/components/auth/AuthForm";
+import { Logo } from "@/components/brand/Logo";
 import { supabase } from "@/lib/supabaseClient";
 
 function LoginPageInner() {
@@ -73,6 +74,7 @@ function LoginPageInner() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="flex w-full max-w-md flex-col items-center gap-4">
+        <Logo />
         <button
           type="button"
           onClick={handleGoogleLogin}
@@ -82,7 +84,7 @@ function LoginPageInner() {
           <span aria-hidden="true" className="inline-flex items-center justify-center">
             <Globe size={20} className="text-gray-600 transition-colors group-hover:text-black" aria-hidden />
           </span>
-          {oauthLoading ? "Starting..." : "Continue with Google"}
+          {oauthLoading ? "Opening..." : "Continue with Google"}
         </button>
 
         {oauthError && (
@@ -94,7 +96,7 @@ function LoginPageInner() {
         <AuthForm mode="login" />
 
         <p className="app-body text-center">
-          Don&apos;t have an account?{" "}
+          Need an account?{" "}
           <Link
             className="font-medium text-gray-900 underline underline-offset-4 hover:text-gray-700"
             href="/signup"

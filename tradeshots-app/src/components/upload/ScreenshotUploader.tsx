@@ -268,7 +268,7 @@ export default function ScreenshotUploader({
           />
         </div>
       </div>
-      <p className="mb-4 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">example: breakout, reversal, fakeout</p>
+      <p className="mb-4 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Example: breakout, reversal, fakeout</p>
 
       <input
         ref={fileInputRef}
@@ -301,22 +301,22 @@ ${isUploading ? "pointer-events-none opacity-50" : ""}
 `.trim()}
       >
         <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
-          Drag & drop your screenshot
+          Begin your record
         </p>
-        <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">or click to upload</p>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">or paste screenshot (Ctrl + V)</p>
+        <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Drop a screenshot here, or click to upload.</p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Or paste a screenshot (Ctrl + V)</p>
 
         {isUploading && (
-          <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">Uploading...</p>
+          <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">Saving screenshot...</p>
         )}
         {isPasting && (
-          <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Pasting screenshot...</p>
+          <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Reading from clipboard...</p>
         )}
       </div>
 
       {successMessage && (
         <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 transition">
-          Screenshot uploaded successfully
+          Screenshot saved.
         </div>
       )}
 

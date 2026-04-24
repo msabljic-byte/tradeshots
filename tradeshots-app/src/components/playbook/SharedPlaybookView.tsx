@@ -1609,8 +1609,8 @@ export default function SharedPlaybookView({
             <div className="mx-auto mb-3 text-2xl" aria-hidden>
               <ImageIcon size={20} className="mx-auto text-gray-600" aria-hidden />
             </div>
-            <p className="text-sm text-gray-700 dark:text-gray-300">No screenshots yet in this playbook</p>
-            <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Check back later or import it to start building.</p>
+            <p className="text-sm text-gray-700 dark:text-gray-300">Nothing saved yet.</p>
+            <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Your vault begins with one screenshot.</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">

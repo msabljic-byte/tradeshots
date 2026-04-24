@@ -48,7 +48,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
     setResendMessage(null);
 
     if (!email || !password || (isSignup && !confirmPassword)) {
-      setError("Please fill out all required fields.");
+      setError("Complete all required fields.");
       return;
     }
 
@@ -80,7 +80,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
         } = await supabase.auth.getSession();
 
         if (session) router.replace("/dashboard");
-        else setError("Signup successful. Please check your email to confirm.");
+        else setError("Check your email to confirm your account.");
         return;
       }
 
@@ -120,7 +120,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
 
       setResendMessage({
         type: "success",
-        text: "Confirmation email resent. Please check your inbox.",
+        text: "Confirmation email sent. Check your inbox.",
       });
     } finally {
       setResendLoading(false);
@@ -129,7 +129,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
 
   return (
     <div className="mx-auto w-full max-w-md">
-      <div className="rounded-2xl border border-default bg-surface p-8 shadow-md">
+      <div className="ui-card rounded-2xl p-8 shadow-md">
         <h1 className="app-page-title mb-6">
           {isSignup ? "Create your account" : "Welcome back"}
         </h1>
@@ -145,7 +145,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="h-11 w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 placeholder-gray-500 outline-none focus:ring-2 focus:ring-black"
+              className="ui-input h-11 w-full px-4 py-2 text-sm outline-none"
               placeholder="you@example.com"
               required
             />
@@ -165,14 +165,14 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
                 autoComplete={isSignup ? "new-password" : "current-password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="h-11 w-full rounded-lg border border-gray-300 bg-white px-4 py-2 pr-12 text-sm text-gray-900 placeholder-gray-500 outline-none focus:ring-2 focus:ring-black"
-                placeholder="Your password"
+                className="ui-input h-11 w-full px-4 py-2 pr-12 text-sm outline-none"
+                placeholder="Enter your password"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((prev) => !prev)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 transition-colors hover:text-black"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted transition-colors hover:text-foreground"
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? (
@@ -210,14 +210,14 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="h-11 w-full rounded-lg border border-gray-300 bg-white px-4 py-2 pr-12 text-sm text-gray-900 placeholder-gray-500 outline-none focus:ring-2 focus:ring-black"
-                  placeholder="Re-enter your password"
+                className="ui-input h-11 w-full px-4 py-2 pr-12 text-sm outline-none"
+                  placeholder="Enter password again"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 transition-colors hover:text-black"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted transition-colors hover:text-foreground"
                   aria-label={
                     showConfirmPassword ? "Hide confirm password" : "Show confirm password"
                   }
@@ -235,16 +235,16 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
           {needsConfirmationResend ? (
             <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm">
               <p className="font-medium text-yellow-900">
-                Email not confirmed. Resend confirmation email?
+                Email not confirmed. Send another confirmation email?
               </p>
 
               <button
                 type="button"
                 disabled={resendLoading}
                 onClick={handleResendEmail}
-                className="app-button-text mt-3 inline-flex h-10 items-center justify-center rounded-lg bg-black px-4 text-white transition hover:bg-gray-800 disabled:opacity-60"
+                className="app-button-text ui-button ui-button-primary mt-3 inline-flex h-10 items-center justify-center px-4 disabled:opacity-60"
               >
-                {resendLoading ? "Resending..." : "Resend email"}
+                {resendLoading ? "Sending..." : "Send email"}
               </button>
 
               {resendMessage && (
@@ -270,9 +270,9 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
           <button
             type="submit"
             disabled={loading}
-            className="app-button-text mt-2 h-11 rounded-lg bg-black px-4 text-white transition hover:bg-gray-800 disabled:opacity-60"
+            className="app-button-text ui-button ui-button-primary mt-2 h-11 px-4 disabled:opacity-60"
           >
-            {loading ? "Please wait..." : isSignup ? "Sign up" : "Log in"}
+            {loading ? "Please wait..." : isSignup ? "Create account" : "Log in"}
           </button>
         </form>
       </div>

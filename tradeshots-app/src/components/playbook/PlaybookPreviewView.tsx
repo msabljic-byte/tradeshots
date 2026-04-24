@@ -948,20 +948,6 @@ export default function PlaybookPreviewView({
               {previewScreenshots.length} screenshots
               {updatedText ? ` • ${updatedText}` : ""}
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
-              <span className="inline-flex items-center gap-1">
-                <Heart size={14} className={liked ? "fill-red-500 text-red-500" : "text-gray-500"} />
-                {likesCount}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <MessageCircle size={14} className="text-gray-500" />
-                {comments.length}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Download size={14} className="text-gray-500" />
-                {importsCount}
-              </span>
-            </div>
             <button
               type="button"
               onClick={() => void toggleLike()}
@@ -1064,7 +1050,7 @@ export default function PlaybookPreviewView({
         </div>
       </div>
 
-      <div className="flex items-center gap-3 border-t pt-4">
+      <div className="flex items-center gap-3 pt-6">
         <button
           type="button"
           onClick={handleOpenAuthorProfile}
@@ -1089,7 +1075,6 @@ export default function PlaybookPreviewView({
 
           <div className="text-left">
             <p className="text-sm text-gray-700 transition-colors hover:underline dark:text-gray-300">{authorName}</p>
-            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Creator</p>
           </div>
         </button>
         {authorUsername ? (
@@ -1147,7 +1132,7 @@ export default function PlaybookPreviewView({
                         draggable={false}
                       />
                     ) : null}
-                    <span className="absolute right-2 top-2 rounded-full bg-black/75 px-2 py-0.5 text-[11px] font-medium text-white">
+                    <span className="ui-badge ui-badge-overlay absolute right-2 top-2 px-2 py-0.5">
                       {item.is_paid ? `€${Number(item.price ?? 0).toFixed(0)}` : "Free"}
                     </span>
                   </div>
@@ -1173,9 +1158,9 @@ export default function PlaybookPreviewView({
           <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 shadow-sm dark:border-gray-700 dark:bg-gray-900">
             <div className="flex flex-col items-center justify-center text-center">
               <MessageCircle size={24} className="text-gray-500 dark:text-gray-400" aria-hidden />
-              <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">No comments yet</p>
+              <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">Nothing written yet.</p>
               <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                Be the first to share your thoughts
+                Add the first note.
               </p>
               <button
                 type="button"

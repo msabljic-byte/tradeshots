@@ -38,6 +38,7 @@ import PlaybookPreviewView, {
   type SelectedPlaybook,
 } from "@/components/playbook/PlaybookPreviewView";
 import ProfileView, { type ProfileIdentity } from "@/components/profile/ProfileView";
+import { Logo } from "@/components/brand/Logo";
 import { supabase } from "@/lib/supabaseClient";
 import {
   syncSharedPlaybookAndNotifyImporters,
@@ -567,7 +568,7 @@ function DashboardPageContent() {
   const [shareStrategyTypes, setShareStrategyTypes] = useState<string[]>([]);
   const [shareExperienceLevel, setShareExperienceLevel] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
-  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [sidebarWidth, setSidebarWidth] = useState(220);
   const skipSidebarPersistRef = useRef(true);
   const prevActiveFolderIdRef = useRef<string | null>(null);
   const didAutoOpenFirstShotRef = useRef(false);
@@ -4907,14 +4908,14 @@ function DashboardPageContent() {
     };
   }, []);
 
-  // useEffect: restore sidebar width from localStorage on mount (clamped 200–500px).
+  // useEffect: restore sidebar width from localStorage on mount (clamped 220–500px).
   useEffect(() => {
     try {
       const saved = localStorage.getItem("sidebarWidth");
       if (saved != null && saved !== "") {
         const n = Number(saved);
         if (!Number.isNaN(n)) {
-          setSidebarWidth(Math.min(500, Math.max(200, n)));
+          setSidebarWidth(Math.min(500, Math.max(220, n)));
         }
       }
     } catch {
@@ -4940,10 +4941,12 @@ function DashboardPageContent() {
     <div className="flex h-screen bg-background">
       <div
         style={{ width: sidebarWidth }}
-        className="relative box-border flex min-w-0 shrink-0 flex-col border-r border-gray-200 bg-white p-4"
+        className="ui-sidebar-nav relative box-border flex min-w-0 shrink-0 flex-col p-4"
         onDragOver={(e) => e.preventDefault()}
       >
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">TradeShots</h1>
+        <h1>
+          <Logo />
+        </h1>
 
         <div className="space-y-4">
         <div className="space-y-2">
@@ -4955,8 +4958,8 @@ function DashboardPageContent() {
               transition-all duration-150
               ${
                 activeView === "marketplace"
-                  ? "bg-gray-200 font-medium text-gray-900 dark:bg-gray-800 dark:text-gray-100"
-                  : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                  ? "ui-nav-item ui-nav-item-active font-medium"
+                  : "ui-nav-item"
               }
             `}
           >
@@ -4985,8 +4988,8 @@ function DashboardPageContent() {
               transition-all duration-150
               ${
                 activeView === "dashboard" && activeFolderId === null
-                  ? "bg-gray-200 font-medium text-gray-900 dark:bg-gray-800 dark:text-gray-100"
-                  : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                  ? "ui-nav-item ui-nav-item-active font-medium"
+                  : "ui-nav-item"
               }
             `}
           >
@@ -5011,7 +5014,7 @@ function DashboardPageContent() {
                 if (!name) return;
                 void createFolder(name, null);
               }}
-              className="micro-btn inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+              className="micro-btn ui-button inline-flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium"
             >
               <Plus size={16} aria-hidden />
               New
@@ -5019,15 +5022,15 @@ function DashboardPageContent() {
           </div>
 
           {topLevelFolders.length === 0 ? (
-            <div className="rounded-lg border border-gray-200 bg-white px-3 py-6 text-center">
+            <div className="ui-card px-3 py-6 text-center">
               <div className="mb-2 text-2xl" aria-hidden>
                 <Folder size={20} className="mx-auto text-gray-600" aria-hidden />
               </div>
               <p className="text-sm text-gray-700 dark:text-gray-300">
-                Create your first playbook
+                Nothing saved yet.
               </p>
               <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                Use “New Folder” or import a shared playbook to get started.
+                Your vault begins with one screenshot.
               </p>
             </div>
           ) : (
@@ -5049,7 +5052,7 @@ function DashboardPageContent() {
                     if (!activeFolderId) return;
                     await savePlaybookDescription(activeFolderId, description);
                   }}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300"
+                  className="ui-input w-full px-3 py-2 text-sm shadow-sm transition focus:outline-none"
                   placeholder="Add description..."
                   rows={3}
                   autoFocus
@@ -5085,7 +5088,7 @@ function DashboardPageContent() {
 
             function onMouseMove(ev: MouseEvent) {
               const next = startWidth + (ev.clientX - startX);
-              setSidebarWidth(Math.min(500, Math.max(200, next)));
+              setSidebarWidth(Math.min(500, Math.max(220, next)));
             }
 
             function onMouseUp() {
@@ -5096,17 +5099,17 @@ function DashboardPageContent() {
             window.addEventListener("mousemove", onMouseMove);
             window.addEventListener("mouseup", onMouseUp);
           }}
-          className="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-gray-100"
+          className="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-surface-muted"
         />
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between border-b border-default bg-surface px-6 py-3">
+        <div className="app-topbar flex items-center justify-between border-b border-default bg-surface">
           <div className="w-full max-w-md">
             <button
               type="button"
               onClick={() => setIsCommandOpen(true)}
-              className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
+              className="ui-button flex w-full items-center justify-between px-4 py-2 text-sm font-medium cursor-pointer"
             >
               <span>Search or jump to…</span>
               <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Ctrl + K</span>
@@ -5123,11 +5126,11 @@ function DashboardPageContent() {
                 }}
                 aria-expanded={notificationsOpen}
                 aria-haspopup="menu"
-                className="relative flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 bg-white text-base text-gray-600 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-100 hover:text-black cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-300"
+                className="ui-button relative flex h-9 w-9 items-center justify-center text-base text-muted shadow-sm cursor-pointer focus:outline-none"
               >
                 <Bell size={20} aria-hidden />
                 {unreadNotificationCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 min-w-[1.125rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-tight text-white">
+                  <span className="ui-count-badge absolute -right-0.5 -top-0.5 min-w-[1.125rem] px-1 text-center">
                     {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
                   </span>
                 )}
@@ -5146,10 +5149,10 @@ function DashboardPageContent() {
                           <Sparkles size={20} className="mx-auto text-gray-600" />
                         </div>
                         <p className="text-sm text-gray-700 dark:text-gray-300">
-                          You're all caught up
+                          No updates at the moment.
                         </p>
                         <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                          No new notifications right now.
+                          We will place new activity here.
                         </p>
                       </div>
                     ) : (
@@ -5198,12 +5201,12 @@ function DashboardPageContent() {
                                   </span>
                                   {!n.is_read ? (
                                     <span
-                                      className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500"
+                                      className="ui-status-dot mt-1 h-2 w-2 shrink-0"
                                       aria-label="Unread notification"
                                     />
                                   ) : null}
                                   {openable ? (
-                                    <span className="shrink-0 inline-flex items-center gap-2 text-[10px] text-blue-600">
+                                    <span className="ui-link-accent shrink-0 inline-flex items-center gap-2 text-[10px]">
                                       Open
                                       <ChevronRight size={16} aria-hidden />
                                     </span>
@@ -5237,7 +5240,7 @@ function DashboardPageContent() {
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 aria-expanded={isProfileOpen}
                 aria-haspopup="menu"
-                    className="flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 bg-white text-xs font-semibold text-gray-700 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-300"
+                className="ui-button flex h-9 w-9 items-center justify-center text-xs font-semibold shadow-sm cursor-pointer focus:outline-none"
               >
                 {profileInitials}
               </button>
@@ -5280,8 +5283,8 @@ function DashboardPageContent() {
                         }
                         className={`relative inline-flex h-9 w-16 shrink-0 items-center overflow-hidden rounded-full border p-1 transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-400 ${
                           themeMode === "dark"
-                            ? "border-[#0f1b3d] bg-[#050f2b]"
-                            : "border-gray-300 bg-gray-200"
+                            ? "border-default bg-surface-muted"
+                            : "border-default bg-surface-muted"
                         }`}
                       >
                         <span
@@ -5307,8 +5310,8 @@ function DashboardPageContent() {
                         <span
                           className={`absolute left-1 top-1 inline-block h-7 w-7 transform rounded-full shadow-md transition-transform duration-200 ease-out ${
                             themeMode === "dark"
-                              ? "translate-x-7 bg-[#2f3c6b]"
-                              : "translate-x-0 bg-white"
+                              ? "translate-x-7 bg-surface"
+                              : "translate-x-0 bg-surface"
                           }`}
                         />
                       </button>
@@ -5328,7 +5331,8 @@ function DashboardPageContent() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 font-sans">
+        <div className="app-main-scroll flex-1 overflow-y-auto font-sans">
+          <div className="app-shell-content">
           {error && (
             <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
@@ -5488,7 +5492,7 @@ function DashboardPageContent() {
                 </div>
               ) : null}
 
-              <div className="mb-6" ref={uploaderSectionRef}>
+              <div className="mb-8" ref={uploaderSectionRef}>
                 <ScreenshotUploader
                   folderId={activeFolderId}
                   onUploadComplete={handleUploadComplete}
@@ -5501,10 +5505,10 @@ function DashboardPageContent() {
                     <Upload size={20} className="mx-auto text-gray-600" />
                   </div>
                   <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
-                    Start by uploading your first trade
+                    Nothing saved yet.
                   </p>
                   <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">
-                    Drag & drop screenshots to get started
+                    Your vault begins with one screenshot.
                   </p>
                   <button
                     type="button"
@@ -5521,8 +5525,8 @@ function DashboardPageContent() {
                 </div>
               ) : (
               <>
-              <div className="mb-6 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                <div className="mb-4 flex items-center gap-2">
+              <div className="mb-8 rounded-xl bg-white p-4 shadow-sm dark:bg-gray-900">
+                <div className="mb-6 flex items-center gap-3">
                   <input
                     value={viewName}
                     onChange={(e) => setViewName(e.target.value)}
@@ -5539,7 +5543,7 @@ function DashboardPageContent() {
                   </button>
                 </div>
 
-                <div className="mb-4 flex flex-wrap gap-2">
+                <div className="mb-6 flex flex-wrap gap-2">
                   {savedViews.map((view) => (
                     <div key={view.id} className="group flex items-center gap-2">
                       <button
@@ -5582,7 +5586,7 @@ function DashboardPageContent() {
                   ))}
                 </div>
 
-                <div className="mb-3 flex flex-wrap items-start gap-2">
+                <div className="mb-4 flex flex-wrap items-start gap-3">
                   <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -5676,7 +5680,7 @@ function DashboardPageContent() {
                   </div>
                 </div>
 
-                <div className="mb-4 flex flex-wrap items-center gap-2">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
                   <input
                     type="text"
                     value={tagFilter}
@@ -5704,66 +5708,6 @@ function DashboardPageContent() {
                     </div>
                   ))}
 
-                  {quickFilters.voice && (
-                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
-                      <span className="font-medium">Has Voice</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setQuickFilters((prev) => ({ ...prev, voice: false }))
-                        }
-                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
-                        aria-label="Remove voice filter"
-                      >
-                        <X size={16} aria-hidden />
-                      </button>
-                    </div>
-                  )}
-                  {quickFilters.annotations && (
-                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
-                      <span className="font-medium">Has Annotations</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setQuickFilters((prev) => ({ ...prev, annotations: false }))
-                        }
-                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
-                        aria-label="Remove annotations filter"
-                      >
-                        <X size={16} aria-hidden />
-                      </button>
-                    </div>
-                  )}
-                  {quickFilters.notes && (
-                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
-                      <span className="font-medium">Has Notes</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setQuickFilters((prev) => ({ ...prev, notes: false }))
-                        }
-                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
-                        aria-label="Remove notes filter"
-                      >
-                        <X size={16} aria-hidden />
-                      </button>
-                    </div>
-                  )}
-                  {quickFilters.favorites && (
-                    <div className="micro-pill bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-2">
-                      <span className="font-medium">Favorites</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setQuickFilters((prev) => ({ ...prev, favorites: false }))
-                        }
-                        className="text-blue-700 dark:text-blue-200 transition hover:text-blue-900 dark:hover:text-blue-100"
-                        aria-label="Remove favorites filter"
-                      >
-                        <X size={16} aria-hidden />
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {showFilterMenu && (
@@ -5789,7 +5733,7 @@ function DashboardPageContent() {
                         {!selectedKey ? (
                           filteredKeys.length === 0 ? (
                             <div className="px-3 py-2 text-sm text-gray-500">
-                              No results found
+                              No matches yet.
                             </div>
                           ) : (
                             filteredKeys.map((key) => (
@@ -5807,7 +5751,7 @@ function DashboardPageContent() {
                           )
                         ) : filteredValues.length === 0 ? (
                           <div className="px-3 py-2 text-sm text-gray-500">
-                            No results found
+                            No matches yet.
                           </div>
                         ) : (
                           filteredValues.map((value) => (
@@ -5835,10 +5779,10 @@ function DashboardPageContent() {
               {filteredScreenshots.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500">
                   <p className="mb-2 text-sm font-medium text-gray-900">
-                    No screenshots match your filters
+                    Nothing saved yet.
                   </p>
                   <p className="text-xs text-gray-500">
-                    Try adjusting filters, or drag & drop screenshots to get started.
+                    Your vault begins with one screenshot.
                   </p>
                 </div>
               ) : (
@@ -5975,14 +5919,14 @@ function DashboardPageContent() {
                       >
                         {shot.is_new === true ? (
                           <span
-                            className="pointer-events-none absolute left-2 top-2 z-10 animate-new-pulse rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm"
+                            className="ui-badge ui-badge-new pointer-events-none absolute left-2 top-2 z-10 animate-new-pulse px-1.5 py-0.5 uppercase shadow-sm"
                             aria-label="New"
                           >
                             NEW
                           </span>
                         ) : shot.is_updated === true ? (
                           <span
-                            className="pointer-events-none absolute left-2 top-2 z-10 rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm"
+                            className="ui-badge ui-badge-updated pointer-events-none absolute left-2 top-2 z-10 px-1.5 py-0.5 uppercase shadow-sm"
                             aria-label="Updated"
                           >
                             UPDATED
@@ -6092,6 +6036,7 @@ function DashboardPageContent() {
               )}
             </AnimatePresence>
           )}
+          </div>
         </div>
       </div>
 

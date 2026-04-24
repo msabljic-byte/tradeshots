@@ -133,15 +133,142 @@ body {
 }
 
 @layer components {
+  /* Shirumi core UI primitives: editorial minimalism, token-only colors. */
+  .ui-card {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: 0.75rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .ui-input {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 0.5rem;
+  }
+  .ui-input::placeholder {
+    color: var(--text-secondary);
+  }
+  .ui-input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  .ui-button {
+    border: 1px solid var(--border-default);
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+    border-radius: 0.5rem;
+    font-family: var(--font-family-mono);
+  }
+  .ui-button:hover {
+    background-color: var(--bg-surface-muted);
+  }
+  .ui-button-primary {
+    border-color: var(--action-primary);
+    background-color: var(--action-primary);
+    color: var(--action-primary-foreground);
+  }
+  .ui-button-primary:hover {
+    background-color: var(--action-primary-hover);
+    border-color: var(--action-primary-hover);
+  }
+  .ui-tag {
+    border: 1px solid var(--border-default);
+    background-color: var(--bg-surface-muted);
+    color: var(--text-secondary);
+    border-radius: 0.375rem;
+    font-family: var(--font-family-mono);
+  }
+  .ui-badge {
+    border-radius: 9999px;
+    font-family: var(--font-family-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+  }
+  .ui-badge-overlay {
+    background-color: var(--badge-overlay-bg);
+    color: var(--badge-overlay-fg);
+  }
+  .ui-badge-new {
+    background-color: var(--badge-new-bg);
+    color: var(--badge-fg);
+  }
+  .ui-badge-updated {
+    background-color: var(--badge-updated-bg);
+    color: var(--badge-fg);
+  }
+  .ui-count-badge {
+    background-color: var(--status-count-bg);
+    color: var(--status-count-fg);
+    border-radius: 9999px;
+    font-family: var(--font-family-mono);
+    font-size: 0.625rem;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.02em;
+  }
+  .ui-status-dot {
+    background-color: var(--status-unread);
+    border-radius: 9999px;
+  }
+  .ui-link-accent {
+    color: var(--status-unread);
+    font-family: var(--font-family-mono);
+  }
+  .ui-sidebar-nav {
+    border-right: 1px solid var(--border-default);
+    background-color: var(--bg-surface);
+  }
+  .ui-nav-item {
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+  }
+  .ui-nav-item:hover {
+    background-color: var(--bg-surface-muted);
+    color: var(--text-primary);
+  }
+  .ui-nav-item-active {
+    background-color: var(--bg-surface-muted);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+  }
+
   /* Layout helpers (opt-in): use these to keep spacing consistent. */
   .app-container {
-    @apply p-4 sm:p-6;
+    padding: var(--space-16);
+  }
+  @media (min-width: 640px) {
+    .app-container {
+      padding: var(--space-24);
+    }
   }
   .app-stack {
-    @apply flex flex-col gap-6;
+    @apply flex flex-col;
+    gap: var(--space-24);
   }
   .app-stack-tight {
-    @apply flex flex-col gap-4;
+    @apply flex flex-col;
+    gap: var(--space-16);
+  }
+  .app-shell-content {
+    width: 100%;
+    max-width: var(--layout-content-max-width);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .app-topbar {
+    min-height: var(--layout-topbar-height);
+    padding-left: var(--space-24);
+    padding-right: var(--space-24);
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-8);
+  }
+  .app-main-scroll {
+    padding: var(--space-24);
   }
 
   /* Typography helpers (opt-in): use these for consistent hierarchy. */
@@ -177,7 +304,15 @@ body {
     @apply transition-all duration-150 hover:shadow-lg hover:-translate-y-0.5;
   }
   .micro-pill {
-    @apply transition-all duration-150 hover:bg-gray-300 dark:hover:bg-gray-600;
+    @apply transition-all duration-150;
+    border: 1px solid var(--border-default);
+    background-color: var(--bg-surface-muted);
+    color: var(--text-secondary);
+    font-family: var(--font-family-mono);
+  }
+  .micro-pill:hover {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
   }
 
   /* Premium button system */

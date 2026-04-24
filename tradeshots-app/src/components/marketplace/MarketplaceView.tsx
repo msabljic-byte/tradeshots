@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 import { Flame, Mic, Pencil, Search } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import SkeletonCard from "@/components/marketplace/SkeletonCard";
+import { Logo } from "@/components/brand/Logo";
 
 type MarketplaceFolder = {
   id: string;
@@ -323,9 +324,11 @@ export default function MarketplaceView({
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <div className="app-shell-content space-y-8">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Marketplace</h1>
+        <h1>
+          <Logo label="Marketplace" />
+        </h1>
         <select
           value={sortMode}
           onChange={(e) => setSortMode(e.target.value as SortMode)}
@@ -338,38 +341,7 @@ export default function MarketplaceView({
         </select>
       </div>
 
-      <p className="text-sm text-gray-700 dark:text-gray-300">Discover playbooks from other traders</p>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setSelectedAssetTypes([])}
-          className={`micro-pill rounded-full px-3 py-1 text-sm font-medium ${
-            selectedAssetTypes.length === 0
-              ? "bg-black text-white"
-              : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-          }`}
-        >
-          All
-        </button>
-        {assetTypeOptions.map((opt) => {
-          const selected = selectedAssetTypes.includes(opt);
-          return (
-            <button
-              key={`header-asset-${opt}`}
-              type="button"
-              onClick={() => toggleValue(setSelectedAssetTypes, opt)}
-              className={`micro-pill rounded-full px-3 py-1 text-sm font-medium ${
-                selected
-                  ? "bg-black text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-              }`}
-            >
-              {opt}
-            </button>
-          );
-        })}
-      </div>
+      <p className="text-sm text-gray-700 dark:text-gray-300">Find a playbook that matches your process.</p>
 
       <div>
         <label className="relative block">
@@ -615,7 +587,7 @@ export default function MarketplaceView({
                         draggable={false}
                       />
                     ) : null}
-                    <span className="absolute right-2 top-2 rounded-full bg-black/75 px-2 py-0.5 text-[11px] font-medium text-white">
+                    <span className="ui-badge ui-badge-overlay absolute right-2 top-2 px-2 py-0.5">
                       Score {trendingScore}
                     </span>
                   </div>
@@ -661,10 +633,10 @@ export default function MarketplaceView({
       ) : filtered.length === 0 ? (
         <div className="space-y-2 rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-10 text-center dark:border-gray-700 dark:bg-gray-900">
           <p className="text-sm text-gray-700 dark:text-gray-300">
-            No playbooks match your filters
+            No matches yet.
           </p>
           <p className="text-sm text-gray-700 dark:text-gray-300">
-            Adjust filters and search to discover more playbooks.
+            Refine your filters and try again.
           </p>
         </div>
       ) : (
@@ -693,7 +665,7 @@ export default function MarketplaceView({
                     />
                   ) : null}
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
-                  <span className="absolute right-2 top-2 rounded-full bg-black/75 px-2.5 py-0.5 text-xs font-medium text-white opacity-90 transition-opacity duration-200 ease-out group-hover:opacity-100">
+                  <span className="ui-badge ui-badge-overlay absolute right-2 top-2 px-2.5 py-0.5 opacity-90 transition-opacity duration-200 ease-out group-hover:opacity-100">
                     {folder.is_paid ? `€${Number(folder.price ?? 0).toFixed(0)}` : "Free"}
                   </span>
                   <p className="absolute bottom-2 left-3 right-3 line-clamp-2 text-base font-bold text-white drop-shadow">

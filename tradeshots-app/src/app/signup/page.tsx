@@ -9,6 +9,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthForm from "@/components/auth/AuthForm";
+import { Logo } from "@/components/brand/Logo";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function SignupPage() {
@@ -43,10 +44,11 @@ export default function SignupPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="flex w-full max-w-md flex-col items-center gap-4">
+        <Logo />
         <AuthForm mode="signup" />
 
         <p className="app-body text-center">
-          Already have an account?{" "}
+          Already registered?{" "}
           <Link
             className="font-medium text-gray-900 underline underline-offset-4 hover:text-gray-700"
             href="/login"

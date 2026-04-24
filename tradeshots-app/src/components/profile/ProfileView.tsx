@@ -318,14 +318,14 @@ export default function ProfileView({
           <div className="flex flex-col items-center justify-center text-center">
             <FolderOpen size={28} className="text-gray-500 dark:text-gray-400" aria-hidden />
             <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">
-              Create your first playbook
+              Nothing saved yet.
             </p>
             <button
               type="button"
               onClick={() => router.push("/dashboard")}
               className="mt-4 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90"
             >
-              Upload screenshot
+              Begin your record
             </button>
           </div>
         </div>
