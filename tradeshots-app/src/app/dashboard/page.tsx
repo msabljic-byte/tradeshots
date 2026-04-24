@@ -39,6 +39,13 @@ import PlaybookPreviewView, {
 } from "@/components/playbook/PlaybookPreviewView";
 import ProfileView, { type ProfileIdentity } from "@/components/profile/ProfileView";
 import { Logo } from "@/components/brand/Logo";
+import { AddFilterMenu } from "@/components/filters/AddFilterMenu";
+import { ActiveFiltersRow } from "@/components/filters/ActiveFiltersRow";
+import { FilterBar } from "@/components/filters/FilterBar";
+import { FilterOverflowMenu } from "@/components/filters/FilterOverflowMenu";
+import { buildActiveFilterChips } from "@/components/filters/buildActiveFilterChips";
+import { useFilterState } from "@/components/filters/useFilterState";
+import type { QuickFilters } from "@/components/filters/types";
 import { supabase } from "@/lib/supabaseClient";
 import {
   syncSharedPlaybookAndNotifyImporters,
@@ -59,6 +66,7 @@ import ScreenshotUploader from "@/components/upload/ScreenshotUploader";
 import { createPortal } from "react-dom";
 import {
   Bell,
+  BellRing,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -70,13 +78,12 @@ import {
   Lock,
   Link as LinkIcon,
   Image as ImageIcon,
-  Moon,
   Pencil,
   Plus,
   RefreshCw,
   Search,
-  Sun,
   Sparkles,
+  MessageCircle,
   MessageSquare,
   Star,
   Trash2,
@@ -98,6 +105,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Compass,
+  User,
 } from "lucide-react";
 
 /** Row shape for `screenshots` + UI-only fields. */
@@ -336,6 +344,27 @@ function formatVoiceMemoDuration(durationMs: number | null | undefined): string 
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function formatRelative(dateValue: string | null | undefined): string {
+  if (!dateValue) return "JUST NOW";
+  const then = new Date(dateValue).getTime();
+  if (Number.isNaN(then)) return "JUST NOW";
+  const now = Date.now();
+  const seconds = Math.floor((now - then) / 1000);
+  if (seconds < 60) return "JUST NOW";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} MINUTE${minutes === 1 ? "" : "S"} AGO`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} HOUR${hours === 1 ? "" : "S"} AGO`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "YESTERDAY";
+  if (days < 7) return `${days} DAYS AGO`;
+  if (days < 14) return "LAST WEEK";
+  if (days < 30) return `${Math.floor(days / 7)} WEEKS AGO`;
+  if (days < 60) return "LAST MONTH";
+  if (days < 365) return `${Math.floor(days / 30)} MONTHS AGO`;
+  return "LAST YEAR";
+}
+
 type HTMLAudioWithSinkId = HTMLAudioElement & {
   setSinkId?: (deviceId: string) => Promise<void>;
 };
@@ -378,9 +407,9 @@ function getNotificationIcon(
     case "comment":
       return <MessageCircle className={common} />;
     case "reply":
-      return <MessageSquareReply className={common} />;
+      return <MessageSquare className={common} />;
     default:
-      return <Bell className={common} />;
+      return <BellRing className={common} />;
   }
 }
 
@@ -406,6 +435,20 @@ function formatNotificationTimestamp(createdAt: string | null | undefined): stri
   return new Date(ts).toLocaleDateString();
 }
 
+function getCssColorVar(variable: string) {
+  if (typeof window === "undefined") return "";
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  return value;
+}
+
+function resolveTokenColor(primaryVariable: string, fallbackVariable: string) {
+  return (
+    getCssColorVar(primaryVariable) ||
+    getCssColorVar(fallbackVariable) ||
+    "currentColor"
+  );
+}
+
 /**
  * Single-page dashboard: sidebar (folders, profile, notifications), main grid, screenshot modal/editor.
  * All handlers close over Supabase; prefer `fetchScreenshots` / `fetchFolders` after mutations.
@@ -426,6 +469,10 @@ function DashboardPageContent() {
   );
   const [selectedPlaybook, setSelectedPlaybook] = useState<SelectedPlaybook | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<ProfileIdentity | null>(null);
+  const [dismissedPostUploadHint, setDismissedPostUploadHint] = useState(false);
+  const [dismissedMarketplaceHint, setDismissedMarketplaceHint] = useState(false);
+  const [showPostUploadHint, setShowPostUploadHint] = useState(false);
+  const [showMarketplaceHint, setShowMarketplaceHint] = useState(false);
 
   const navigateDashboardView = useCallback(
     (next: "dashboard" | "marketplace" | "playbook" | "profile", username?: string) => {
@@ -489,24 +536,26 @@ function DashboardPageContent() {
   const [loading, setLoading] = useState(true);
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [allScreenshots, setAllScreenshots] = useState<any[]>([]);
-  const [tagFilter, setTagFilter] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
+  const {
+    tagFilter,
+    searchQuery,
+    filters,
+    quickFilters,
+    dateRangeFilter,
+    playbookFilter,
+    setTagFilter,
+    setSearchQuery,
+    setFilters,
+    setQuickFilters,
+    setDateRangeFilter,
+    setPlaybookFilter,
+    removeFilter,
+    clearAllFilters,
+  } = useFilterState();
   const [allAttributes, setAllAttributes] = useState<any[]>([]);
   const [attributeKeyValuesByScreenshot, setAttributeKeyValuesByScreenshot] = useState<
     Record<string, Record<string, string[]>>
   >({});
-  const [filters, setFilters] = useState<
-    Array<{
-      key: string;
-      value: string;
-    }>
-  >([]);
-  const [quickFilters, setQuickFilters] = useState({
-    voice: false,
-    annotations: false,
-    notes: false,
-    favorites: false,
-  });
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
@@ -520,8 +569,6 @@ function DashboardPageContent() {
   const [showMoveMenu, setShowMoveMenu] = useState(false);
   const [bulkTargetIds, setBulkTargetIds] = useState<string[]>([]);
   const [bulkBaseAttributes, setBulkBaseAttributes] = useState<any[] | null>(null);
-  const [selectedKey, setSelectedKey] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [modalEntered, setModalEntered] = useState(false);
   /** Drives Framer exit; `selectedIndex` clears in onExitComplete after animation. */
@@ -540,13 +587,22 @@ function DashboardPageContent() {
       setModalPresentationOpen(true);
     }
   }, [selectedIndex]);
+  useEffect(() => {
+    setStrokeColor((prev) =>
+      prev === "currentColor"
+        ? resolveTokenColor("--annotation-default", "--accent")
+        : prev
+    );
+  }, []);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isAnnotationToolbarOpen, setIsAnnotationToolbarOpen] = useState(true);
   const [showStrokeSizePopover, setShowStrokeSizePopover] = useState(false);
 
   const [savedViews, setSavedViews] = useState<any[]>([]);
-  const [viewName, setViewName] = useState("");
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [showFilterOverflowMenu, setShowFilterOverflowMenu] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const filterOverflowMenuRef = useRef<HTMLDivElement | null>(null);
   const [folders, setFolders] = useState<any[]>([]);
   const topLevelFolders = useMemo(
     () => (folders ?? []).filter((f: any) => f.parent_id == null),
@@ -589,10 +645,6 @@ function DashboardPageContent() {
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<string>("");
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<string>("");
   const isFirstTimeUser = folders.length === 0 && allScreenshots.length === 0;
-  const [dismissedPostUploadHint, setDismissedPostUploadHint] = useState(false);
-  const [dismissedMarketplaceHint, setDismissedMarketplaceHint] = useState(false);
-  const [showPostUploadHint, setShowPostUploadHint] = useState(false);
-  const [showMarketplaceHint, setShowMarketplaceHint] = useState(false);
   const [attributes, setAttributes] = useState<any[]>([]);
   const [attributesDirty, setAttributesDirty] = useState(false);
   const [undoData, setUndoData] = useState<{
@@ -604,6 +656,49 @@ function DashboardPageContent() {
   const [toast, setToast] = useState<string | null>(null);
   const [toastExiting, setToastExiting] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+
+  // useEffect: close add-filter popover on outside click / Escape.
+  useEffect(() => {
+    if (!showFilterMenu) return;
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (filterMenuRef.current && target && !filterMenuRef.current.contains(target)) {
+        setShowFilterMenu(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowFilterMenu(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showFilterMenu]);
+  // useEffect: close filter overflow menu on outside click / Escape.
+  useEffect(() => {
+    if (!showFilterOverflowMenu) return;
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (
+        filterOverflowMenuRef.current &&
+        target &&
+        !filterOverflowMenuRef.current.contains(target)
+      ) {
+        setShowFilterOverflowMenu(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowFilterOverflowMenu(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showFilterOverflowMenu]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -614,7 +709,7 @@ function DashboardPageContent() {
   const [tool, setTool] = useState<
     "select" | "draw" | "line" | "arrow" | "text" | "highlight"
   >("draw");
-  const [strokeColor, setStrokeColor] = useState("#ef4444");
+  const [strokeColor, setStrokeColor] = useState("currentColor");
   const [strokeSize, setStrokeSize] = useState(3);
   const [highlightOpacity, setHighlightOpacity] = useState(0.18);
   const [textDraft, setTextDraft] = useState<{
@@ -894,24 +989,44 @@ function DashboardPageContent() {
     });
 
     setShowFilterMenu(false);
-    setSelectedKey("");
-    setSearchTerm("");
   }
 
-  function removeFilter(index: number) {
-    setFilters((prev) => prev.filter((_, i) => i !== index));
-  }
+  const handleToggleQuickFilter = useCallback(
+    (key: keyof QuickFilters) => {
+      setQuickFilters((prev) => ({ ...prev, [key]: !prev[key] }));
+    },
+    [setQuickFilters]
+  );
 
   function applyDashboardScreenshotFilters(rows: ScreenshotRow[]): ScreenshotRow[] {
     const tagFilterLower = tagFilter.trim().toLowerCase();
-    const notesSearchLower = searchQuery.trim().toLowerCase();
+    const searchLower = searchQuery.trim().toLowerCase();
     return rows.filter((s) => {
+      const attributePairs = attributesByScreenshot[s.id] ?? [];
       const matchesTag =
         !tagFilterLower ||
         s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
-      const matchesNotes =
-        !notesSearchLower ||
-        String(s.notes ?? "").toLowerCase().includes(notesSearchLower);
+      const matchesSearch =
+        !searchLower ||
+        String(s.notes ?? "").toLowerCase().includes(searchLower) ||
+        (s.tags ?? []).some((tag) => tag.toLowerCase().includes(searchLower)) ||
+        attributePairs.some(
+          (pair) =>
+            pair.key.toLowerCase().includes(searchLower) ||
+            pair.value.toLowerCase().includes(searchLower)
+        );
+      const matchesDateRange = (() => {
+        if (!dateRangeFilter.from && !dateRangeFilter.to) return true;
+        const createdAt = new Date(s.created_at).getTime();
+        if (dateRangeFilter.from && createdAt < new Date(dateRangeFilter.from).getTime()) {
+          return false;
+        }
+        if (dateRangeFilter.to && createdAt > new Date(dateRangeFilter.to).getTime()) {
+          return false;
+        }
+        return true;
+      })();
+      const matchesPlaybook = !playbookFilter || String(s.folder_id) === String(playbookFilter);
       const parsedAnnotation = parseAnnotationValue(s.annotations ?? s.annotation);
       const hasAnnotations =
         parsedAnnotation.shapes.length > 0 || parsedAnnotation.image.trim().length > 0;
@@ -926,12 +1041,31 @@ function DashboardPageContent() {
         (!quickFilters.annotations || hasAnnotations) &&
         (!quickFilters.notes || hasNotes) &&
         (!quickFilters.favorites || Boolean(s.is_favorite));
-      if (filters.length === 0) return matchesTag && matchesNotes && passesQuickFilters;
+      if (filters.length === 0) {
+        return matchesSearch && matchesTag && passesQuickFilters && matchesDateRange && matchesPlaybook;
+      }
       const pairs = attributesByScreenshot[s.id] ?? [];
-      const matchesAttributes = filters.every((filter) =>
-        pairs.some((a) => a.key === filter.key && a.value === filter.value)
+      // Group filters by key for OR-within-key + AND-across-keys semantics
+      const filtersByKey = filters.reduce<Record<string, string[]>>((acc, f) => {
+        if (!acc[f.key]) acc[f.key] = [];
+        acc[f.key].push(f.value);
+        return acc;
+      }, {});
+
+      const matchesAttributes = Object.entries(filtersByKey).every(
+        ([key, values]) =>
+          values.some((value) =>
+            pairs.some((a) => a.key === key && a.value === value)
+          )
       );
-      return matchesTag && matchesNotes && passesQuickFilters && matchesAttributes;
+      return (
+        matchesSearch &&
+        matchesTag &&
+        passesQuickFilters &&
+        matchesDateRange &&
+        matchesPlaybook &&
+        matchesAttributes
+      );
     });
   }
 
@@ -1651,8 +1785,8 @@ function DashboardPageContent() {
     }
   }
 
-  async function handleSaveView() {
-    const trimmedName = viewName.trim();
+  async function handleSaveView(name?: string) {
+    const trimmedName = (name ?? "").trim();
     const hasAnyFilter =
       filters.length > 0 ||
       tagFilter.trim().length > 0 ||
@@ -1676,8 +1810,6 @@ function DashboardPageContent() {
         quickFilters,
       },
     });
-
-    setViewName("");
     await fetchSavedViews();
   }
 
@@ -1685,15 +1817,8 @@ function DashboardPageContent() {
     if (!view?.filters) return;
     // Backward compatibility: older saved views stored `filters` as array only.
     if (Array.isArray(view.filters)) {
+      clearAllFilters();
       setFilters(view.filters);
-      setTagFilter("");
-      setSearchQuery("");
-      setQuickFilters({
-        voice: false,
-        annotations: false,
-        notes: false,
-        favorites: false,
-      });
       setActiveViewId(view.id);
       return;
     }
@@ -1728,15 +1853,7 @@ function DashboardPageContent() {
 
     if (activeViewId === id) {
       setActiveViewId(null);
-      setFilters([]);
-      setTagFilter("");
-      setSearchQuery("");
-      setQuickFilters({
-        voice: false,
-        annotations: false,
-        notes: false,
-        favorites: false,
-      });
+      clearAllFilters();
     }
   }
 
@@ -1944,6 +2061,10 @@ function DashboardPageContent() {
       } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user || cancelled) return;
+      if (session.access_token) {
+        // Ensure the realtime socket uses the authenticated JWT (RLS-safe subscriptions).
+        supabase.realtime.setAuth(session.access_token);
+      }
 
       const ch = supabase
         .channel(`dashboard-screenshots-${user.id}`)
@@ -1959,11 +2080,14 @@ function DashboardPageContent() {
             void fetchScreenshotsRef.current();
           }
         )
-        .subscribe((status) => {
-          if (status === "CHANNEL_ERROR") {
-            console.warn(
-              "screenshots realtime subscription failed (add table to supabase_realtime publication if needed)"
-            );
+        .subscribe((status, error) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.warn("screenshots realtime subscription failed", { status, error });
+            return;
+          }
+          // `CLOSED` is expected during effect cleanup, navigation, and dev hot-reload.
+          if (status === "CLOSED" && !cancelled) {
+            console.info("screenshots realtime subscription closed");
           }
         });
 
@@ -2153,24 +2277,6 @@ function DashboardPageContent() {
     return Array.from(keys).sort((a, b) => a.localeCompare(b));
   }, [allAttributesNormalized, attributeKeyValuesByScreenshot]);
 
-  /** Values for selected attribute key — read maps first, then merged pairs */
-  const valuesForKey = useMemo(() => {
-    if (!selectedKey) return [];
-    const values = new Set<string>();
-    for (const keyMap of Object.values(attributeKeyValuesByScreenshot)) {
-      const list = keyMap[selectedKey];
-      if (list) {
-        for (const v of list) {
-          if (v) values.add(v);
-        }
-      }
-    }
-    for (const a of allAttributesNormalized) {
-      if (a.key === selectedKey && a.value) values.add(a.value);
-    }
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [selectedKey, attributeKeyValuesByScreenshot, allAttributesNormalized]);
-
   /** All distinct values (for modal Field/Value datalists) */
   const allUniqueAttributeValues = useMemo(() => {
     const values = new Set<string>();
@@ -2186,18 +2292,6 @@ function DashboardPageContent() {
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [allAttributesNormalized, attributeKeyValuesByScreenshot]);
-
-  const filteredKeys = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return uniqueKeys;
-    return uniqueKeys.filter((k) => k.toLowerCase().includes(term));
-  }, [searchTerm, uniqueKeys]);
-
-  const filteredValues = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return valuesForKey;
-    return valuesForKey.filter((v) => v.toLowerCase().includes(term));
-  }, [searchTerm, valuesForKey]);
 
   // useEffect: arrow keys navigate between screenshots in the open modal (respects tag + attribute filters).
   useEffect(() => {
@@ -3071,7 +3165,59 @@ function DashboardPageContent() {
     }
   }
 
-  const filteredScreenshots = applyDashboardScreenshotFilters(screenshots);
+  const filteredScreenshots = useMemo(
+    () => applyDashboardScreenshotFilters(screenshots),
+    [
+      screenshots,
+      searchQuery,
+      tagFilter,
+      filters,
+      quickFilters,
+      attributesByScreenshot,
+      dateRangeFilter,
+      playbookFilter,
+    ]
+  );
+  const counterText = useMemo(() => {
+    const totalCount = screenshots.length;
+    const filteredCount = filteredScreenshots.length;
+    const hasFilters =
+      filters.length > 0 ||
+      tagFilter.trim().length > 0 ||
+      searchQuery.trim().length > 0 ||
+      quickFilters.voice ||
+      quickFilters.annotations ||
+      quickFilters.notes ||
+      quickFilters.favorites ||
+      dateRangeFilter.from !== null ||
+      dateRangeFilter.to !== null ||
+      playbookFilter !== null;
+    if (totalCount === 0) {
+      return "0 SCREENSHOTS · BEGIN YOUR RECORD";
+    }
+    if (hasFilters) {
+      return `${filteredCount} OF ${totalCount} SCREENSHOTS · FILTERED`;
+    }
+    const latestTimestamp = screenshots.reduce<number>((latest, shot) => {
+      const value = new Date(shot.created_at).getTime();
+      if (Number.isNaN(value)) return latest;
+      return Math.max(latest, value);
+    }, 0);
+    const lastSaved =
+      latestTimestamp > 0 ? new Date(latestTimestamp).toISOString() : screenshots[0]?.created_at ?? null;
+    return `${totalCount} SCREENSHOT${totalCount === 1 ? "" : "S"} · LAST SAVED ${formatRelative(lastSaved)}`;
+  }, [filteredScreenshots.length, filters, quickFilters, screenshots, searchQuery, tagFilter]);
+  const hasActiveDashboardFilters =
+    filters.length > 0 ||
+    tagFilter.trim().length > 0 ||
+    searchQuery.trim().length > 0 ||
+    quickFilters.voice ||
+    quickFilters.annotations ||
+    quickFilters.notes ||
+    quickFilters.favorites ||
+    dateRangeFilter.from !== null ||
+    dateRangeFilter.to !== null ||
+    playbookFilter !== null;
   const screenshotFilterSignature = JSON.stringify({
     tagFilter,
     searchQuery,
@@ -3093,13 +3239,16 @@ function DashboardPageContent() {
   const canRecordPrivateMemo = Boolean(selectedImage && isImportedScreenshot);
   const panelWidth = isPanelOpen ? 380 : 48;
   const annotationToolbarWidth = isAnnotationToolbarOpen ? 68 : 44;
-  const profileInitials = (email ?? "?")
+  const rawProfileInitials = (email ?? "")
     .split("@")[0]
     .split(/[.\-_ ]+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
-    .join("") || "?";
+    .join("");
+  const profileInitials = /^[A-Z0-9]{1,2}$/.test(rawProfileInitials)
+    ? rawProfileInitials
+    : "";
 
   // useEffect: optional deep-link polish — auto-open first screenshot for selected deep-linked folder.
   useEffect(() => {
@@ -3564,7 +3713,7 @@ function DashboardPageContent() {
         }
         const pad = 8;
         ctx.save();
-        ctx.strokeStyle = "#2563eb";
+        ctx.strokeStyle = resolveTokenColor("--annotation-selection", "--accent");
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 4]);
         const boxX = Math.max(0, minX - pad);
@@ -3581,11 +3730,11 @@ function DashboardPageContent() {
           { x: boxX, y: boxY + boxH },
           { x: boxX + boxW, y: boxY + boxH },
         ];
-        ctx.fillStyle = "#2563eb";
+        ctx.fillStyle = resolveTokenColor("--annotation-selection", "--accent");
         for (const corner of corners) {
           ctx.fillRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle);
         }
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = resolveTokenColor("--annotation-handle-center", "--text-inverse");
         for (const corner of corners) {
           ctx.fillRect(corner.x - 1.5, corner.y - 1.5, 3, 3);
         }
@@ -3627,7 +3776,7 @@ function DashboardPageContent() {
         }
         const pad = 6;
         ctx.save();
-        ctx.strokeStyle = "#60a5fa";
+        ctx.strokeStyle = resolveTokenColor("--annotation-hover", "--accent");
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
         ctx.strokeRect(
@@ -4018,8 +4167,8 @@ function DashboardPageContent() {
                 ${isActive
                   ? "bg-gray-200 text-gray-900 font-semibold dark:bg-gray-700 dark:text-gray-100"
                   : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"}
-                ${draggedScreenshotId.length > 0 ? "hover:bg-blue-100" : ""}
-                ${hoverFolderId === folder.id ? "bg-blue-100" : ""}
+                ${draggedScreenshotId.length > 0 ? "hover:bg-surface-muted" : ""}
+                ${hoverFolderId === folder.id ? "bg-surface-muted" : ""}
               `}
               style={{ paddingLeft: `${level * 8}px` }}
               title={hasChildren(String(folder.id)) ? "Click arrow to expand" : ""}
@@ -4078,8 +4227,8 @@ function DashboardPageContent() {
                   navigateDashboardView("dashboard");
                   setActiveFolderId(folder.id);
                 }}
-                className={`flex min-w-0 flex-1 items-center gap-2 text-sm ${
-                  isActive ? "font-semibold" : "font-medium"
+                className={`app-label-meta flex min-w-0 flex-1 items-center gap-2 ${
+                  isActive ? "text-foreground" : "text-muted"
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-2">
@@ -4087,28 +4236,20 @@ function DashboardPageContent() {
                   <span className="min-w-0 truncate">{folder.name}</span>
                 </span>
                 {folder.is_imported ? (
-                  <span
-                    className={`shrink-0 align-middle text-[10px] font-semibold uppercase tracking-wide ${
-                      "rounded bg-amber-100 px-1 py-0.5 text-amber-900"
-                    }`}
-                  >
+                  <span className="app-label-meta shrink-0 align-middle rounded bg-[color:var(--warning-tint)] px-1 py-0.5 text-[color:var(--warning)]">
                     Imported
                   </span>
                 ) : null}
                 {newInFolder > 0 ? (
-                  <span
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-white ${
-                      isActive ? "bg-blue-500" : "bg-blue-600"
-                    }`}
-                  >
+                  <span className="app-label-meta shrink-0 rounded bg-surface-muted px-1.5 py-0.5 text-muted">
                     {newInFolder} new
                   </span>
                 ) : null}
               </span>
 
               <span
-                className={`ml-auto text-xs ${
-                  isActive ? "text-gray-500" : "text-gray-400"
+                className={`app-label-meta ml-auto ${
+                  isActive ? "text-muted" : "text-muted"
                 }`}
               >
                 {getFolderCount(folder.id)}
@@ -4944,17 +5085,18 @@ function DashboardPageContent() {
         className="ui-sidebar-nav relative box-border flex min-w-0 shrink-0 flex-col p-4"
         onDragOver={(e) => e.preventDefault()}
       >
-        <h1>
-          <Logo />
+        <h1 className="mb-5 px-3">
+          <Logo variant="horizontal" sealSize="md" />
         </h1>
 
         <div className="space-y-4">
-        <div className="space-y-2">
+        <div className="space-y-[2px] px-2">
           <button
             type="button"
             onClick={() => navigateDashboardView("marketplace")}
+            style={{ margin: 0 }}
             className={`
-              flex w-full items-stretch overflow-hidden rounded-lg text-left text-sm
+              relative flex w-full items-stretch overflow-hidden rounded-lg text-left text-sm
               transition-all duration-150
               ${
                 activeView === "marketplace"
@@ -4964,18 +5106,18 @@ function DashboardPageContent() {
             `}
           >
             <span
-              className={`w-1 shrink-0 rounded-sm ${
-                activeView === "marketplace" ? "bg-blue-500" : "bg-transparent"
+              className={`pointer-events-none absolute bottom-2 left-2 top-2 w-[2px] rounded ${
+                activeView === "marketplace" ? "bg-[color:var(--accent)]" : "bg-transparent"
               }`}
               aria-hidden
             />
-            <span className="flex flex-1 items-center px-3 py-2">
+            <span className="flex flex-1 items-center py-2">
               <Compass size={16} className="mr-2 inline-block shrink-0" aria-hidden />
               Marketplace
             </span>
           </button>
 
-          <div className="border-t border-gray-200 dark:border-gray-700" />
+          <div className="border-t border-default" />
 
           <button
             type="button"
@@ -4983,8 +5125,9 @@ function DashboardPageContent() {
               navigateDashboardView("dashboard");
               setActiveFolderId(null);
             }}
+            style={{ margin: 0 }}
             className={`
-              flex w-full items-stretch overflow-hidden rounded-lg text-left text-sm
+              relative flex w-full items-stretch overflow-hidden rounded-lg text-left text-sm
               transition-all duration-150
               ${
                 activeView === "dashboard" && activeFolderId === null
@@ -4994,18 +5137,21 @@ function DashboardPageContent() {
             `}
           >
             <span
-              className={`w-1 shrink-0 rounded-sm ${
+              className={`pointer-events-none absolute bottom-2 left-2 top-2 w-[2px] rounded ${
                 activeView === "dashboard" && activeFolderId === null
-                  ? "bg-blue-500"
+                  ? "bg-[color:var(--accent)]"
                   : "bg-transparent"
               }`}
               aria-hidden
             />
-            <span className="flex flex-1 items-center px-3 py-2">All Screenshots</span>
+            <span className="flex flex-1 items-center py-2">
+              <span className="mr-2 inline-block h-4 w-4 shrink-0" aria-hidden />
+              All Screenshots
+            </span>
           </button>
 
-          <div className="flex items-center justify-between px-1 pt-1">
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Playbooks</p>
+          <div className="flex items-center justify-between pt-1">
+            <p className="app-label-meta text-muted">Playbooks</p>
             <button
               type="button"
               aria-label="Create new playbook folder"
@@ -5014,10 +5160,10 @@ function DashboardPageContent() {
                 if (!name) return;
                 void createFolder(name, null);
               }}
-              className="micro-btn ui-button inline-flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium"
+              className="micro-btn ui-button inline-flex h-10 items-center justify-center gap-2 px-3 py-2 text-sm font-medium leading-none"
             >
-              <Plus size={16} aria-hidden />
-              New
+              <Plus size={16} className="shrink-0" aria-hidden />
+              <span className="leading-none">New</span>
             </button>
           </div>
 
@@ -5040,8 +5186,8 @@ function DashboardPageContent() {
         </div>
 
         {activeFolderId && (
-          <div className="space-y-2 border-t border-gray-100 pt-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Playbook description</p>
+          <div className="space-y-2 border-t border-default pt-4">
+            <p className="app-label-meta text-muted">Playbook description</p>
             <div>
               {editingDescription ? (
                 <textarea
@@ -5104,15 +5250,15 @@ function DashboardPageContent() {
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="app-topbar flex items-center justify-between border-b border-default bg-surface">
+        <div className="app-topbar flex items-center justify-between border-b border-default bg-elevated">
           <div className="w-full max-w-md">
             <button
               type="button"
               onClick={() => setIsCommandOpen(true)}
-              className="ui-button flex w-full items-center justify-between px-4 py-2 text-sm font-medium cursor-pointer"
+              className="ui-button flex w-full items-center justify-between px-4 py-2 text-sm cursor-pointer"
             >
               <span>Search or jump to…</span>
-              <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Ctrl + K</span>
+              <span className="app-label-meta text-muted">Ctrl + K</span>
             </button>
           </div>
 
@@ -5126,39 +5272,37 @@ function DashboardPageContent() {
                 }}
                 aria-expanded={notificationsOpen}
                 aria-haspopup="menu"
-                className="ui-button relative flex h-9 w-9 items-center justify-center text-base text-muted shadow-sm cursor-pointer focus:outline-none"
+                className="ui-button relative flex h-11 w-11 items-center justify-center border-default bg-surface text-foreground shadow-sm cursor-pointer focus:outline-none hover:bg-surface-muted hover:text-[color:var(--accent)]"
               >
-                <Bell size={20} aria-hidden />
+                <Bell className="h-8 w-8" strokeWidth={2.6} aria-hidden />
                 {unreadNotificationCount > 0 && (
-                  <span className="ui-count-badge absolute -right-0.5 -top-0.5 min-w-[1.125rem] px-1 text-center">
-                    {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
-                  </span>
+                  <span className="ui-status-dot absolute right-1.5 top-1.5 h-1.5 w-1.5" />
                 )}
               </button>
 
               {notificationsOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-72 rounded-lg border border-default bg-surface shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
-                  <div className="border-b border-gray-100 p-3 text-lg font-medium text-gray-800 dark:text-gray-200">
+                <div className="ui-popover absolute right-0 z-50 mt-2 w-80 border-default !bg-surface animate-dropdown-in transition-all duration-150 ease-in-out">
+                  <div className="app-body border-b border-default px-4 py-3 text-[20px] leading-[1.35]">
                     Notifications
                   </div>
 
-                  <div className="max-h-80 overflow-y-auto">
+                  <div className="notifications-scroll max-h-80 overflow-y-auto">
                     {notifications.length === 0 ? (
                       <div className="px-3 py-4 text-center">
                         <div className="mx-auto mb-2 text-xl" aria-hidden>
-                          <Sparkles size={20} className="mx-auto text-gray-600" />
+                          <Sparkles size={20} className="mx-auto text-muted" />
                         </div>
-                        <p className="text-sm text-gray-700 dark:text-gray-300">
+                        <p className="app-body text-sm">
                           No updates at the moment.
                         </p>
-                        <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                        <p className="app-body mt-1 text-sm text-muted">
                           We will place new activity here.
                         </p>
                       </div>
                     ) : (
                       groupedNotifications.map((group) => (
-                        <div key={group.label} className="border-b border-gray-100 last:border-b-0">
-                          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <div key={group.label} className="border-b border-default last:border-b-0">
+                          <div className="app-label-meta px-4 py-2 text-muted">
                             {group.label}
                           </div>
                           {group.items.map((n) => {
@@ -5177,40 +5321,42 @@ function DashboardPageContent() {
                                   }
                                   if (markReadOnClick) void markNotificationRead(n.id);
                                 }}
-                                className={`w-full border-t border-gray-100 p-3 text-left text-sm ${
+                                className={`w-full border-t border-default px-4 py-2.5 text-left ${
                                   clickable
-                                    ? "cursor-pointer transition-all duration-150 ease-in-out hover:bg-gray-100"
+                                    ? "cursor-pointer transition-all duration-150 ease-in-out hover:bg-surface-muted"
                                     : "cursor-default"
                                 } disabled:cursor-default disabled:opacity-60`}
                               >
-                                <div className="flex items-start gap-2">
-                                  <span className="shrink-0" aria-hidden>
+                                <div className="grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2">
+                                  <span className="mt-0.5 shrink-0" aria-hidden>
                                     {getNotificationIcon(n.type)}
                                   </span>
                                   <span className="min-w-0 flex-1">
                                     <span
-                                      className={`block ${
-                                        n.is_read ? "text-gray-500" : "font-semibold text-gray-900"
+                                      className={`app-body block text-[16px] leading-[1.35] ${
+                                        n.is_read ? "text-muted" : "text-foreground"
                                       }`}
                                     >
                                       {n.message ?? n.type ?? "Notification"}
                                     </span>
-                                    <span className="mt-0.5 block text-xs text-gray-500">
+                                    <span className="mt-0.5 block font-mono text-[11px] uppercase tracking-[0.08em] text-muted">
                                       {formatNotificationTimestamp(n.created_at)}
                                     </span>
                                   </span>
-                                  {!n.is_read ? (
-                                    <span
-                                      className="ui-status-dot mt-1 h-2 w-2 shrink-0"
-                                      aria-label="Unread notification"
-                                    />
-                                  ) : null}
-                                  {openable ? (
-                                    <span className="ui-link-accent shrink-0 inline-flex items-center gap-2 text-[10px]">
-                                      Open
-                                      <ChevronRight size={16} aria-hidden />
-                                    </span>
-                                  ) : null}
+                                  <span className="mt-0.5 inline-flex min-h-[18px] shrink-0 items-center justify-end gap-2">
+                                    {!n.is_read ? (
+                                      <span
+                                        className="ui-status-dot h-2 w-2 shrink-0"
+                                        aria-label="Unread notification"
+                                      />
+                                    ) : null}
+                                    {openable ? (
+                                      <span className="ui-link-accent inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-[0.08em]">
+                                        Open
+                                        <ChevronRight size={12} aria-hidden />
+                                      </span>
+                                    ) : null}
+                                  </span>
                                 </div>
                               </button>
                             );
@@ -5226,7 +5372,7 @@ function DashboardPageContent() {
                       e.stopPropagation();
                       void markAllNotificationsRead();
                     }}
-                    className="w-full border-t border-gray-100 p-2 text-sm font-medium text-gray-700 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer"
+                    className="app-label-meta w-full border-t border-default px-4 py-3 text-muted transition-all duration-150 ease-in-out hover:bg-surface-muted cursor-pointer"
                   >
                     Mark all as read
                   </button>
@@ -5240,35 +5386,37 @@ function DashboardPageContent() {
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 aria-expanded={isProfileOpen}
                 aria-haspopup="menu"
-                className="ui-button flex h-9 w-9 items-center justify-center text-xs font-semibold shadow-sm cursor-pointer focus:outline-none"
+                className="ui-button flex h-10 w-10 items-center justify-center text-sm font-semibold shadow-sm cursor-pointer focus:outline-none"
               >
-                {profileInitials}
+                {profileInitials ? (
+                  <span className="app-label-meta leading-none text-foreground">{profileInitials}</span>
+                ) : (
+                  <span className="app-label-meta leading-none text-foreground">ME</span>
+                )}
               </button>
 
               {isProfileOpen && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-56 origin-top-right rounded-xl border border-default bg-surface p-2 shadow-lg animate-dropdown-in transition-all duration-150 ease-in-out">
-                  <div className="px-2 py-1">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                <div className="ui-popover absolute right-0 top-full z-50 mt-2 w-72 origin-top-right border-default !bg-surface p-3 animate-dropdown-in transition-all duration-150 ease-in-out">
+                  <div className="px-4 py-1.5">
+                    <p className="app-label-meta">
                       Signed in as
                     </p>
-                    <p className="truncate text-sm text-gray-900">{email ?? ""}</p>
+                    <p className="app-body truncate text-base">{email ?? ""}</p>
                   </div>
-                  <div className="my-1 border-t border-gray-100" />
+                  <div className="my-1.5 border-t border-default" />
                   <button
                     type="button"
-                    className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm font-medium text-gray-700 dark:text-gray-300"
+                    className="app-label-meta flex w-full items-center rounded-md px-4 py-2.5 text-left text-muted"
                     disabled
                   >
                     Account settings
                   </button>
-                  <div className="mx-2 mb-1 mt-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-2">
+                  <div className="mx-4 mb-1 mt-1.5 rounded-lg border border-default bg-surface-muted px-3 py-2.5">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {themeMode === "dark" ? "Dark mode" : "Light mode"}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                          {themeMode === "dark" ? "Switch to light" : "Switch to dark"}
+                        <p className="app-label-meta">Mode</p>
+                        <p className="app-body text-base">
+                          {themeMode === "dark" ? "Dark" : "Light"}
                         </p>
                       </div>
                       <button
@@ -5281,37 +5429,13 @@ function DashboardPageContent() {
                             ? "Switch to light mode"
                             : "Switch to dark mode"
                         }
-                        className={`relative inline-flex h-9 w-16 shrink-0 items-center overflow-hidden rounded-full border p-1 transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-400 ${
-                          themeMode === "dark"
-                            ? "border-default bg-surface-muted"
-                            : "border-default bg-surface-muted"
-                        }`}
+                        className="relative inline-flex h-8 w-14 shrink-0 items-center rounded-full border border-default bg-surface p-1 transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
                       >
                         <span
-                          className={`absolute left-2 transition-opacity duration-150 ${
-                            themeMode === "dark" ? "opacity-50" : "opacity-90"
-                          }`}
-                          aria-hidden
-                        >
-                          <Sun size={16} className="text-gray-400" />
-                        </span>
-                        <span
-                          className={`absolute right-2 transition-opacity duration-150 ${
-                            themeMode === "dark" ? "opacity-95" : "opacity-60"
-                          }`}
-                          aria-hidden
-                        >
-                          <Moon
-                            className={`h-4 w-4 ${
-                              themeMode === "dark" ? "text-gray-100" : "text-gray-500"
-                            }`}
-                          />
-                        </span>
-                        <span
-                          className={`absolute left-1 top-1 inline-block h-7 w-7 transform rounded-full shadow-md transition-transform duration-200 ease-out ${
+                          className={`inline-block h-6 w-6 transform rounded-full border border-default bg-surface shadow-sm transition-transform duration-200 ease-out ${
                             themeMode === "dark"
-                              ? "translate-x-7 bg-surface"
-                              : "translate-x-0 bg-surface"
+                              ? "translate-x-6"
+                              : "translate-x-0"
                           }`}
                         />
                       </button>
@@ -5321,7 +5445,7 @@ function DashboardPageContent() {
                     type="button"
                     onClick={handleLogout}
                     disabled={signingOut}
-                    className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm text-red-600 transition-all duration-150 ease-in-out hover:bg-gray-100 cursor-pointer disabled:opacity-60"
+                    className="app-label-meta flex w-full items-center rounded-md px-4 py-2.5 text-left text-[color:var(--danger)] transition-all duration-150 ease-in-out hover:bg-surface-muted cursor-pointer disabled:opacity-60"
                   >
                     {signingOut ? "Signing out..." : "Log out"}
                   </button>
@@ -5355,8 +5479,8 @@ function DashboardPageContent() {
                   transition={{ duration: 0.22, ease: "easeOut" }}
                 >
                   {showMarketplaceHint && !dismissedMarketplaceHint ? (
-                    <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100">
-                      <p>Import playbooks to learn from others</p>
+                    <div className="ui-tone-info mb-4 flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-sm">
+                      <p>Import playbooks for private study.</p>
                       <button
                         type="button"
                         onClick={() => {
@@ -5364,7 +5488,7 @@ function DashboardPageContent() {
                           setDismissedMarketplaceHint(true);
                           writeDismissedHint("marketplaceImportPlaybooks");
                         }}
-                        className="rounded p-1 text-blue-700 transition hover:bg-blue-100 hover:text-blue-900 dark:text-blue-200 dark:hover:bg-blue-900/50 dark:hover:text-blue-100"
+                        className="rounded p-1 text-muted transition hover:bg-surface-muted hover:text-foreground"
                         aria-label="Dismiss marketplace hint"
                       >
                         <X size={14} aria-hidden />
@@ -5431,12 +5555,12 @@ function DashboardPageContent() {
             <>
               {isFirstTimeUser ? (
                 <div className="mx-auto flex min-h-[60vh] w-full max-w-3xl flex-col items-center justify-center gap-8">
-                  <div className="w-full rounded-2xl border border-gray-200 bg-white px-6 py-8 text-center shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-10">
-                    <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                  <div className="ui-card w-full rounded-2xl px-8 py-10 text-center sm:px-10">
+                    <p className="app-section-title">
                       Start building your trading playbook
                     </p>
-                    <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
-                      Organize, tag and review your trades like a pro
+                    <p className="app-body mt-3 text-muted">
+                      Organize, tag, and review your setups with clarity.
                     </p>
                     <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
                       <button
@@ -5447,14 +5571,14 @@ function DashboardPageContent() {
                             block: "start",
                           })
                         }
-                        className="w-full rounded-md bg-black px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 sm:w-auto"
+                        className="btn btn-primary w-full sm:w-auto"
                       >
-                        Upload your first screenshot
+                        Begin your record
                       </button>
                       <button
                         type="button"
                         onClick={() => navigateDashboardView("marketplace")}
-                        className="w-full rounded-md border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-800 transition hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 sm:w-auto"
+                        className="btn btn-secondary w-full sm:w-auto"
                       >
                         Explore marketplace
                       </button>
@@ -5465,18 +5589,27 @@ function DashboardPageContent() {
                     <ScreenshotUploader
                       folderId={activeFolderId}
                       onUploadComplete={handleUploadComplete}
+                      compact={false}
                     />
                   </div>
                 </div>
               ) : (
               <>
               <div className="mb-6">
-                <h2 className="text-lg font-medium text-gray-800 dark:text-gray-200">Your Screenshots</h2>
+                <h1
+                  className="mb-2 text-[var(--text-h1)] font-normal leading-[1.1] tracking-[-0.02em] text-foreground"
+                  style={{ fontFamily: "var(--font-serif)" }}
+                >
+                  Your Screenshots
+                </h1>
+                <p className="whitespace-nowrap text-[10px] uppercase tracking-[0.15em] text-muted" style={{ fontFamily: "var(--font-mono)" }}>
+                  {counterText}
+                </p>
               </div>
 
               {showPostUploadHint && !dismissedPostUploadHint ? (
-                <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                  <p>Add notes or annotations to capture your setup</p>
+                <div className="ui-tone-info mb-4 flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-sm">
+                  <p className="app-body text-sm">Add notes or annotations to capture your setup.</p>
                   <button
                     type="button"
                     onClick={() => {
@@ -5484,7 +5617,7 @@ function DashboardPageContent() {
                       setDismissedPostUploadHint(true);
                       writeDismissedHint("postUploadNotesOrAnnotations");
                     }}
-                    className="rounded p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                    className="rounded p-1 text-muted transition hover:bg-surface-muted hover:text-foreground"
                     aria-label="Dismiss upload hint"
                   >
                     <X size={14} aria-hidden />
@@ -5492,22 +5625,23 @@ function DashboardPageContent() {
                 </div>
               ) : null}
 
-              <div className="mb-8" ref={uploaderSectionRef}>
+              <div className="mb-6" ref={uploaderSectionRef}>
                 <ScreenshotUploader
                   folderId={activeFolderId}
                   onUploadComplete={handleUploadComplete}
+                  compact={screenshots.length > 0}
                 />
               </div>
 
               {screenshots.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="mb-2" aria-hidden>
-                    <Upload size={20} className="mx-auto text-gray-600" />
+                    <Upload size={20} className="mx-auto text-muted" />
                   </div>
-                  <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
+                  <p className="app-section-title text-base">
                     Nothing saved yet.
                   </p>
-                  <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">
+                  <p className="app-body mt-2 text-sm text-muted">
                     Your vault begins with one screenshot.
                   </p>
                   <button
@@ -5518,31 +5652,14 @@ function DashboardPageContent() {
                         block: "start",
                       })
                     }
-                    className="mt-4 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+                    className="btn btn-primary mt-4"
                   >
-                    Upload
+                    Begin your record
                   </button>
                 </div>
               ) : (
               <>
-              <div className="mb-8 rounded-xl bg-white p-4 shadow-sm dark:bg-gray-900">
-                <div className="mb-6 flex items-center gap-3">
-                  <input
-                    value={viewName}
-                    onChange={(e) => setViewName(e.target.value)}
-                    placeholder="View name"
-                    className="rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveView()}
-                    className="btn btn-primary"
-                  >
-                    Save View
-                  </button>
-                </div>
-
+              <div className="mb-6 rounded-xl border border-default bg-elevated p-5">
                 <div className="mb-6 flex flex-wrap gap-2">
                   {savedViews.map((view) => (
                     <div key={view.id} className="group flex items-center gap-2">
@@ -5550,7 +5667,7 @@ function DashboardPageContent() {
                         type="button"
                         onClick={() => applyView(view)}
                         className={`
-                          micro-pill rounded-full px-3 py-1 text-sm transition
+                          micro-pill rounded-full px-3 py-1.5 transition
                           ${activeViewId === view.id
                             ? "bg-gray-900 text-white"
                             : "bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -5586,188 +5703,76 @@ function DashboardPageContent() {
                   ))}
                 </div>
 
-                <div className="mb-4 flex flex-wrap items-start gap-3">
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowFilterMenu(true);
-                      setSelectedKey("");
-                      setSearchTerm("");
-                    }}
-                    className="micro-btn rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-200 cursor-pointer dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-700"
-                  >
-                    <Plus size={16} className="mr-2 inline-block text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
-                    Add Filter
-                  </button>
+                <ActiveFiltersRow
+                  chips={buildActiveFilterChips({
+                    tagFilter,
+                    searchQuery,
+                    filters,
+                    quickFilters,
+                    dateRangeFilter,
+                    playbookFilter,
+                    folders: (folders ?? []).map((f: any) => ({
+                      id: String(f.id),
+                      name: String(f.name ?? ""),
+                    })),
+                    onRemoveAttribute: removeFilter,
+                    onClearSearch: () => setSearchQuery(""),
+                    onClearTag: () => setTagFilter(""),
+                    onSetDateRange: setDateRangeFilter,
+                    onSetPlaybook: setPlaybookFilter,
+                    onToggleQuickFilter: handleToggleQuickFilter,
+                  })}
+                  onClearAll={clearAllFilters}
+                />
 
-                  <button
-                    type="button"
-                    onClick={() => setSelectedIds(filteredScreenshots.map((s) => s.id))}
-                    className="text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-200"
-                  >
-                    Select All
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setQuickFilters((prev) => ({ ...prev, voice: !prev.voice }))
-                    }
-                    className={`micro-pill rounded-full px-3 py-1 text-sm font-medium transition ${
-                      quickFilters.voice
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
-                    }`}
-                  >
-                    Has Voice
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setQuickFilters((prev) => ({
-                        ...prev,
-                        annotations: !prev.annotations,
-                      }))
-                    }
-                    className={`micro-pill rounded-full px-3 py-1 text-sm font-medium transition ${
-                      quickFilters.annotations
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
-                    }`}
-                  >
-                    Has Annotations
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setQuickFilters((prev) => ({ ...prev, notes: !prev.notes }))
-                    }
-                    className={`micro-pill rounded-full px-3 py-1 text-sm font-medium transition ${
-                      quickFilters.notes
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
-                    }`}
-                  >
-                    Has Notes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setQuickFilters((prev) => ({ ...prev, favorites: !prev.favorites }))
-                    }
-                    className={`micro-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium transition ${
-                      quickFilters.favorites
-                        ? "bg-blue-500 text-white"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                    }`}
-                  >
-                    <Star
-                      className={`h-3.5 w-3.5 ${quickFilters.favorites ? "fill-current" : ""}`}
-                      aria-hidden
+                <FilterBar
+                  searchQuery={searchQuery}
+                  quickFilters={quickFilters}
+                  hasActiveDashboardFilters={hasActiveDashboardFilters}
+                  onSearchChange={setSearchQuery}
+                  onToggleQuickFilter={handleToggleQuickFilter}
+                  showFilterMenu={showFilterMenu}
+                  onToggleFilterMenu={() => {
+                    setShowFilterMenu((prev) => !prev);
+                    setShowFilterOverflowMenu(false);
+                  }}
+                  filterMenuRef={filterMenuRef}
+                  renderFilterMenuContent={() => (
+                    <AddFilterMenu
+                      screenshots={screenshots}
+                      attributesByScreenshot={attributesByScreenshot}
+                      folders={(folders ?? []).map((f: any) => ({
+                        id: String(f.id),
+                        name: String(f.name ?? ""),
+                      }))}
+                      tagFilter={tagFilter}
+                      filters={filters}
+                      dateRangeFilter={dateRangeFilter}
+                      playbookFilter={playbookFilter}
+                      onSetTagFilter={setTagFilter}
+                      onAddAttributeFilter={(pair) => addFilter(pair.key, pair.value)}
+                      onRemoveAttributeFilter={removeFilter}
+                      onSetDateRange={setDateRangeFilter}
+                      onSetPlaybook={setPlaybookFilter}
+                      onClose={() => setShowFilterMenu(false)}
                     />
-                    Favorites
-                  </button>
-                  </div>
-                  <div className="ml-auto w-full max-w-xs">
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search notes..."
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
+                  )}
+                  showFilterOverflowMenu={showFilterOverflowMenu}
+                  onToggleFilterOverflowMenu={() => {
+                    setShowFilterOverflowMenu((prev) => !prev);
+                    setShowFilterMenu(false);
+                  }}
+                  filterOverflowMenuRef={filterOverflowMenuRef}
+                  renderFilterOverflowMenuContent={() => (
+                    <FilterOverflowMenu
+                      savedViewsCount={savedViews.length}
+                      onSaveView={(name) => void handleSaveView(name)}
+                      onClose={() => setShowFilterOverflowMenu(false)}
                     />
-                  </div>
-                </div>
+                  )}
+                />
 
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
-                    value={tagFilter}
-                    onChange={(e) => setTagFilter(e.target.value)}
-                    placeholder="Filter by tag..."
-                    className="min-w-[220px] flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-500 transition focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:ring-gray-500"
-                  />
 
-                  {filters.map((f, index) => (
-                    <div
-                      key={`${f.key}-${f.value}-${index}`}
-                    className="micro-pill bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs px-2 py-1 rounded-md flex items-center gap-2"
-                    >
-                      <span className="font-medium">
-                        {f.key}: {f.value}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeFilter(index)}
-                        className="text-gray-500 dark:text-gray-400 transition hover:text-gray-700 dark:hover:text-gray-200"
-                        aria-label="Remove filter"
-                      >
-                        <X size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
-                      </button>
-                    </div>
-                  ))}
-
-                </div>
-
-                {showFilterMenu && (
-                  <div
-                    className="fixed inset-0 z-[200] flex cursor-pointer items-start justify-center bg-black/40 pt-32"
-                    onClick={() => setShowFilterMenu(false)}
-                  >
-                    <div
-                      className="w-full max-w-md cursor-default rounded-xl border border-gray-200 bg-white p-4 shadow-xl animate-dropdown-in transition-all duration-150 ease-in-out dark:border-gray-700 dark:bg-gray-800"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        autoFocus
-                        placeholder={
-                          selectedKey ? "Search value..." : "Search attribute..."
-                        }
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full border-b border-gray-300 px-2 py-2 text-sm text-gray-900 placeholder:text-gray-500 outline-none dark:border-gray-700 dark:text-gray-100 dark:placeholder:text-gray-500"
-                      />
-
-                      <div className="mt-2 max-h-60 overflow-y-auto">
-                        {!selectedKey ? (
-                          filteredKeys.length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-gray-500">
-                              No matches yet.
-                            </div>
-                          ) : (
-                            filteredKeys.map((key) => (
-                              <div
-                                key={key}
-                                onClick={() => {
-                                  setSelectedKey(key);
-                                  setSearchTerm("");
-                                }}
-                                className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-100 transition-all duration-150 ease-in-out hover:bg-gray-200 dark:hover:bg-gray-700"
-                              >
-                                {key}
-                              </div>
-                            ))
-                          )
-                        ) : filteredValues.length === 0 ? (
-                          <div className="px-3 py-2 text-sm text-gray-500">
-                            No matches yet.
-                          </div>
-                        ) : (
-                          filteredValues.map((value) => (
-                            <div
-                              key={value}
-                              onClick={() => addFilter(selectedKey, value)}
-                              className="cursor-pointer rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-100 transition-all duration-150 ease-in-out hover:bg-gray-200 dark:hover:bg-gray-700"
-                            >
-                              {value}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
               <motion.div
@@ -5776,14 +5781,25 @@ function DashboardPageContent() {
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
               >
-              {filteredScreenshots.length === 0 ? (
+              {filteredScreenshots.length === 0 && hasActiveDashboardFilters ? (
+                <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
+                  <p className="mb-2 font-serif text-lg italic text-[var(--text-secondary)]">
+                    No screenshots match the current filters.
+                  </p>
+                  <p className="mb-6 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
+                    Try adjusting or clearing them.
+                  </p>
+                  <button
+                    onClick={clearAllFilters}
+                    className="rounded-[var(--radius-md)] border border-[var(--border-strong)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-shadow)]"
+                  >
+                    Clear all filters
+                  </button>
+                </div>
+              ) : filteredScreenshots.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center text-center text-gray-500">
-                  <p className="mb-2 text-sm font-medium text-gray-900">
-                    Nothing saved yet.
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Your vault begins with one screenshot.
-                  </p>
+                  <p className="mb-2 text-sm font-medium text-gray-900">Nothing saved yet.</p>
+                  <p className="text-xs text-gray-500">Your vault begins with one screenshot.</p>
                 </div>
               ) : (
                 <div
@@ -5820,8 +5836,8 @@ function DashboardPageContent() {
                         ghost.style.left = "-1000px";
                         ghost.style.padding = "6px 10px";
                         ghost.style.borderRadius = "8px";
-                        ghost.style.background = "rgba(17,24,39,0.92)";
-                        ghost.style.color = "#fff";
+                        ghost.style.background = resolveTokenColor("--drag-ghost-bg", "--badge-overlay-bg");
+                        ghost.style.color = resolveTokenColor("--drag-ghost-fg", "--text-inverse");
                         ghost.style.fontSize = "12px";
                         ghost.style.fontWeight = "600";
                         ghost.style.pointerEvents = "none";
@@ -5874,19 +5890,19 @@ function DashboardPageContent() {
                       }}
                       className={`group micro-card relative flex h-full flex-col overflow-hidden rounded-xl border shadow-sm ${
                         highlightNew
-                          ? "border-blue-400/75 bg-gradient-to-b from-blue-500/15 to-transparent shadow-[0_0_0_1px_rgba(59,130,246,0.12)] animate-card-highlight-new"
+                          ? "border-default bg-surface animate-card-highlight-new"
                           : highlightUpdated
-                            ? "border-amber-400/75 bg-gradient-to-b from-amber-500/15 to-transparent shadow-[0_0_0_1px_rgba(245,158,11,0.12)] animate-card-highlight-updated"
+                            ? "border-default bg-surface animate-card-highlight-updated"
                             : "border-default bg-surface hover:bg-surface-muted"
                       } cursor-pointer ${
                         selectedIds.includes(shot.id)
-                          ? "ring-2 ring-gray-900 scale-[0.98]"
+                          ? "ring-2 ring-foreground scale-[0.98]"
                           : ""
                       }`}
                     >
                       {selectedIds.includes(shot.id) && (
                         <div className="absolute top-2 left-2 rounded bg-surface p-1 shadow">
-                          <Check size={16} className="text-green-600" aria-hidden />
+                          <Check size={16} className="text-[color:var(--success)]" aria-hidden />
                         </div>
                       )}
                       <button
@@ -5899,7 +5915,7 @@ function DashboardPageContent() {
                             !Boolean(shot.is_favorite)
                           );
                         }}
-                        className="absolute right-2 top-2 z-20 rounded-full bg-black/55 p-1.5 text-white transition hover:bg-black/70"
+                        className="absolute right-2 top-2 z-20 rounded-full bg-[color:var(--badge-overlay-bg)] p-1.5 text-[color:var(--badge-overlay-fg)] transition hover:opacity-90"
                         title={shot.is_favorite ? "Remove favorite" : "Mark favorite"}
                         aria-label={shot.is_favorite ? "Remove favorite" : "Mark favorite"}
                       >
@@ -5910,23 +5926,19 @@ function DashboardPageContent() {
                       </button>
                       <div
                         className={`relative h-48 w-full overflow-hidden ${
-                          highlightNew
-                            ? "bg-blue-100/40"
-                            : highlightUpdated
-                              ? "bg-amber-100/40"
-                              : "bg-gray-100"
+                          highlightNew || highlightUpdated ? "bg-surface-muted" : "ui-media-placeholder"
                         }`}
                       >
                         {shot.is_new === true ? (
                           <span
-                            className="ui-badge ui-badge-new pointer-events-none absolute left-2 top-2 z-10 animate-new-pulse px-1.5 py-0.5 uppercase shadow-sm"
+                            className="ui-badge ui-badge-new pointer-events-none absolute left-2 top-2 z-10 px-2 py-1 font-semibold tracking-[0.08em]"
                             aria-label="New"
                           >
                             NEW
                           </span>
                         ) : shot.is_updated === true ? (
                           <span
-                            className="ui-badge ui-badge-updated pointer-events-none absolute left-2 top-2 z-10 px-1.5 py-0.5 uppercase shadow-sm"
+                            className="ui-badge ui-badge-updated pointer-events-none absolute left-2 top-2 z-10 px-2 py-1 font-semibold tracking-[0.08em]"
                             aria-label="Updated"
                           >
                             UPDATED
@@ -5941,13 +5953,10 @@ function DashboardPageContent() {
                             loadedImages[shot.id] ? "opacity-100" : "opacity-0"
                           }`}
                         />
-                        <div className="pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover:bg-black/10" />
-                        <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-xs text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                          View
-                        </div>
+                        <div className="pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover:bg-black/6" />
                       </div>
 
-                      <div className="flex min-h-[3.5rem] flex-grow flex-col justify-center px-3 py-3">
+                      <div className="flex min-h-[3.5rem] flex-grow flex-col justify-start px-3 py-3">
                         {(() => {
                           const screenshotAttributes = attributesByScreenshot[shot.id] ?? [];
                           const parsedAnnotation = parseAnnotationValue(
@@ -5963,10 +5972,14 @@ function DashboardPageContent() {
                               shot.private_voice_memo_url ||
                               shot.private_voice_memo_path
                           );
-                          const metadataPills = [
-                            ...(shot.tags ?? []).map((tag) => String(tag)),
-                            ...screenshotAttributes.slice(0, 4).map((attr) => `${attr.key}: ${attr.value}`),
-                          ];
+                          const tagPills = (shot.tags ?? []).map((tag) => String(tag).toLowerCase());
+                          const attributePills = screenshotAttributes
+                            .slice(0, 4)
+                            .map(
+                              (attr) =>
+                                `${String(attr.key).toUpperCase()}: ${String(attr.value).toLowerCase()}`
+                            );
+                          const metadataPills = [...tagPills, ...attributePills];
                           const hasAnyMetaSignal =
                             metadataPills.length > 0 || hasAnnotation || hasNote || hasVoiceMemo;
                           if (metadataPills.length === 0) {
@@ -5980,29 +5993,40 @@ function DashboardPageContent() {
                           }
                           return (
                             <>
-                              <div className="mb-2.5 flex items-center gap-2">
-                                {hasAnnotation && (
-                                  <span title="Has annotation">
-                                    <Pencil size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
-                                  </span>
-                                )}
-                                {hasNote && (
-                                  <span title="Has note">
-                                    <MessageSquare size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
-                                  </span>
-                                )}
-                                {hasVoiceMemo && (
-                                  <span title="Has voice memo">
-                                    <Mic size={16} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition" aria-hidden />
-                                  </span>
-                                )}
+                              <div className="mb-2 flex h-4 items-center gap-1.5">
+                                <span
+                                  title="Has annotation"
+                                  className={hasAnnotation ? "text-[color:var(--text-primary)]" : "text-[color:var(--text-muted)] opacity-45"}
+                                >
+                                  <Pencil size={14} aria-hidden />
+                                </span>
+                                <span
+                                  title="Has note"
+                                  className={hasNote ? "text-[color:var(--text-primary)]" : "text-[color:var(--text-muted)] opacity-45"}
+                                >
+                                  <MessageSquare size={14} aria-hidden />
+                                </span>
+                                <span
+                                  title="Has voice memo"
+                                  className={hasVoiceMemo ? "text-[color:var(--text-primary)]" : "text-[color:var(--text-muted)] opacity-45"}
+                                >
+                                  <Mic size={14} aria-hidden />
+                                </span>
                               </div>
                               {metadataPills.length > 0 ? (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {metadataPills.map((pill, i) => (
+                                <div className="flex flex-wrap gap-1">
+                                  {tagPills.map((pill, i) => (
                                     <span
-                                      key={`${shot.id}-pill-${i}-${pill}`}
-                                      className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs px-2 py-1 rounded-md"
+                                      key={`${shot.id}-tag-${i}-${pill}`}
+                                      className="rounded-sm border border-default bg-surface-muted px-2 py-1 font-mono text-[12px] leading-4 text-muted"
+                                    >
+                                      {pill}
+                                    </span>
+                                  ))}
+                                  {attributePills.map((pill, i) => (
+                                    <span
+                                      key={`${shot.id}-attr-${i}-${pill}`}
+                                      className="rounded-sm border border-default bg-surface-muted px-2 py-1 font-mono text-[12px] leading-4 text-muted"
                                     >
                                       {pill}
                                     </span>
@@ -6014,13 +6038,6 @@ function DashboardPageContent() {
                         })()}
                       </div>
 
-                      {selectedIds.length === 0 && (
-                        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200">
-                          <div className="whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-lg">
-                            {multiSelectHint}
-                          </div>
-                        </div>
-                      )}
                     </div>
                     );
                   })}
@@ -6107,7 +6124,7 @@ function DashboardPageContent() {
 
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+          <div className="ui-modal w-full max-w-sm">
             <p className="mb-4 text-sm text-gray-900">
               Delete {selectedIds.length} screenshots?
             </p>
@@ -6135,7 +6152,7 @@ function DashboardPageContent() {
 
       {folderToDelete && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+          <div className="ui-modal w-full max-w-sm">
             <p className="mb-4 text-sm text-gray-900">Delete this folder?</p>
 
             <div className="flex justify-end gap-2">
@@ -6165,7 +6182,7 @@ function DashboardPageContent() {
           onClick={() => closeShareModal()}
         >
           <div
-            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
+            className="ui-modal max-h-[85vh] w-full max-w-lg overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="mb-4 text-sm font-semibold text-gray-900">
@@ -6337,7 +6354,7 @@ function DashboardPageContent() {
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <label className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-100">
-                  {shareCoverUploading ? "Uploading..." : "Upload / Replace"}
+                  {shareCoverUploading ? "Saving..." : "Update cover"}
                   <input
                     type="file"
                     accept="image/*"
@@ -7014,9 +7031,9 @@ function DashboardPageContent() {
                             setAttributesDirty(true);
                           }
                         }
-                        className="mt-3 text-sm text-blue-600 hover:underline"
+                        className="mt-3 text-sm text-[color:var(--accent)] hover:underline"
                       >
-                        + Add field
+                        + Add attribute
                       </button>
 
                       {savedAttributesToast && (
@@ -7471,7 +7488,7 @@ function DashboardPageContent() {
 
               {commandItems.length === 0 && (
                 <div className="px-4 py-3 text-sm text-gray-500">
-                  No results found
+                  No matches yet.
                 </div>
               )}
             </div>

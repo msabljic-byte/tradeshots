@@ -326,13 +326,14 @@ export default function MarketplaceView({
   return (
     <div className="app-shell-content space-y-8">
       <div className="flex items-center justify-between gap-3">
-        <h1>
-          <Logo label="Marketplace" />
-        </h1>
+        <div className="flex items-center gap-4">
+          <Logo variant="horizontal" sealSize="sm" />
+          <h1 className="app-section-title">Marketplace</h1>
+        </div>
         <select
           value={sortMode}
           onChange={(e) => setSortMode(e.target.value as SortMode)}
-          className="micro-btn rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          className="ui-input micro-btn rounded-md px-3 py-1.5 text-sm"
         >
           <option value="new">New</option>
           <option value="popular">Popular</option>
@@ -350,7 +351,7 @@ export default function MarketplaceView({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search strategies..."
-            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-gray-500"
+            className="ui-input w-full rounded-lg py-2 pl-9 pr-3 text-sm outline-none"
           />
         </label>
       </div>
@@ -562,7 +563,7 @@ export default function MarketplaceView({
       {!loading && trendingPlaybooks.length > 0 ? (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">🔥 Trending Playbooks</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Trending Playbooks</h2>
             <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
               Likes + Imports + Recent Activity
             </p>
@@ -609,9 +610,7 @@ export default function MarketplaceView({
                     <p className="line-clamp-1 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       {creator.name}
                     </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
-                      {likes} likes • {imports} imports
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-300">{imports} imports</p>
                   </div>
                 </button>
               );
@@ -655,7 +654,7 @@ export default function MarketplaceView({
                 onClick={() => onOpenPlaybook?.(folder)}
                 className="group micro-card overflow-hidden rounded-2xl border border-gray-200 bg-white text-left shadow-sm dark:border-gray-700 dark:bg-gray-900"
               >
-                <div className="relative h-40 w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+                <div className="relative h-40 w-full overflow-hidden ui-media-placeholder">
                   {cover ? (
                     <img
                       src={cover}
@@ -664,7 +663,7 @@ export default function MarketplaceView({
                       draggable={false}
                     />
                   ) : null}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
+                  <div className="ui-media-overlay pointer-events-none absolute inset-x-0 bottom-0 h-16" />
                   <span className="ui-badge ui-badge-overlay absolute right-2 top-2 px-2.5 py-0.5 opacity-90 transition-opacity duration-200 ease-out group-hover:opacity-100">
                     {folder.is_paid ? `€${Number(folder.price ?? 0).toFixed(0)}` : "Free"}
                   </span>
@@ -674,10 +673,6 @@ export default function MarketplaceView({
                 </div>
 
                 <div className="space-y-2 p-4">
-                  <p className="line-clamp-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {folder.name || "Playbook"}
-                  </p>
-
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -714,11 +709,6 @@ export default function MarketplaceView({
                   <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                     {screenshotCount} screenshots • {primaryAsset}
                   </p>
-
-                  <div className="flex gap-1 text-xs text-gray-500 dark:text-gray-400">
-                    {folder.has_annotations ? <span title="Annotations">✏️</span> : null}
-                    {folder.has_voice ? <span title="Voice">🎤</span> : null}
-                  </div>
 
                 </div>
               </button>

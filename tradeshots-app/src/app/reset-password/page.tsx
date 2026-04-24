@@ -34,7 +34,7 @@ export default function ResetPasswordPage() {
         return;
       }
 
-      setSuccess("Check your email for reset link");
+      setSuccess("Check your email for a reset link.");
     } finally {
       setLoading(false);
     }

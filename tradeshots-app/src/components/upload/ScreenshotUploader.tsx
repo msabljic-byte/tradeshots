@@ -9,61 +9,25 @@
 import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { syncSharedPlaybookAndNotifyImporters } from "@/lib/notifyPlaybookUpdate";
-import { X } from "lucide-react";
+import { Plus } from "lucide-react";
 
 export default function ScreenshotUploader({
   folderId,
   onUploadComplete,
+  compact = false,
 }: {
   /** When set, new screenshots are created inside this playbook folder. */
   folderId?: string | null;
   onUploadComplete?: () => void;
+  compact?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPasting, setIsPasting] = useState(false);
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagDraft, setTagDraft] = useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  function normalizeTag(tag: string) {
-    return tag.trim();
-  }
-
-  function addTagsFromString(value: string) {
-    const parts = value
-      .split(",")
-      .map(normalizeTag)
-      .filter((t) => t.length > 0);
-
-    if (parts.length === 0) return;
-
-    setTags((prev) => {
-      const seen = new Set(prev.map((t) => t.toLowerCase()));
-      const next = [...prev];
-      for (const t of parts) {
-        const key = t.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        next.push(t);
-      }
-      return next;
-    });
-  }
-
-  function commitDraft() {
-    const t = normalizeTag(tagDraft);
-    if (!t) return;
-    addTagsFromString(t);
-    setTagDraft("");
-  }
-
-  function removeTag(tagToRemove: string) {
-    setTags((prev) => prev.filter((t) => t !== tagToRemove));
-  }
 
   function openFilePicker() {
     fileInputRef.current?.click();
@@ -111,21 +75,11 @@ export default function ScreenshotUploader({
         .getPublicUrl(fileName);
 
       const publicUrl = publicUrlData.publicUrl;
-      const draftTags = tagDraft
-        .split(",")
-        .map(normalizeTag)
-        .filter((t) => t.length > 0);
-      const tagsArray = [...tags, ...draftTags].filter((t, i, arr) => {
-        const key = t.toLowerCase();
-        return arr.findIndex((x) => x.toLowerCase() === key) === i;
-      });
-
       console.log("Uploading for user:", user.id);
 
       const insertPayload: Record<string, unknown> = {
         user_id: user.id,
         image_url: publicUrl,
-        tags: tagsArray,
       };
       if (folderId != null && folderId !== "") {
         insertPayload.folder_id = folderId;
@@ -152,8 +106,6 @@ export default function ScreenshotUploader({
       }
 
       setSuccessMessage("Screenshot uploaded successfully.");
-      setTags([]);
-      setTagDraft("");
       setTimeout(() => {
         setSuccessMessage(null);
       }, 2500);
@@ -219,57 +171,7 @@ export default function ScreenshotUploader({
   }
 
   return (
-    <div className="w-full rounded-2xl border border-default bg-surface p-6 shadow-sm">
-      <div className="mb-4">
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus-within:ring-2 focus-within:ring-gray-300 transition">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              className="relative inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700"
-            >
-              {tag}
-              <button
-                type="button"
-                aria-label={`Remove tag ${tag}`}
-                onClick={() => removeTag(tag)}
-                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gray-300 text-[10px] leading-none text-gray-600 transition-colors duration-150 ease-in-out hover:bg-gray-100 hover:text-black cursor-pointer"
-              >
-                <X size={16} aria-hidden />
-              </button>
-            </span>
-          ))}
-          <input
-            type="text"
-            value={tagDraft}
-            onChange={(e) => {
-              const next = e.target.value;
-              if (next.includes(",")) {
-                const parts = next.split(",");
-                const complete = parts.slice(0, -1).join(",");
-                const remainder = parts[parts.length - 1] ?? "";
-                addTagsFromString(complete);
-                setTagDraft(remainder);
-                return;
-              }
-              setTagDraft(next);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "," || e.key === "Enter") {
-                e.preventDefault();
-                commitDraft();
-                return;
-              }
-              if (e.key === "Backspace" && tagDraft.length === 0 && tags.length > 0) {
-                setTags((prev) => prev.slice(0, -1));
-              }
-            }}
-            placeholder={tags.length === 0 ? "Add tags (comma separated)" : "Add another tag..."}
-            className="min-w-[10ch] flex-1 bg-transparent px-1 py-1 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none"
-          />
-        </div>
-      </div>
-      <p className="mb-4 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Example: breakout, reversal, fakeout</p>
-
+    <div className="w-full">
       <input
         ref={fileInputRef}
         type="file"
@@ -278,41 +180,93 @@ export default function ScreenshotUploader({
         className="hidden"
       />
 
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={openFilePicker}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            openFilePicker();
-          }
-        }}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        className={`
-cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-150 ease-in-out
-${isDragActive
-  ? "border-gray-900 bg-gray-100 scale-[1.01]"
-  : "border-gray-300 hover:border-gray-400 hover:bg-gray-100"
-}
+      {compact ? (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={openFilePicker}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              openFilePicker();
+            }
+          }}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          className={`
+cursor-pointer flex h-14 w-full items-center justify-between rounded-[var(--radius-lg)] border-[1.5px] border-dashed border-[color:var(--border-strong)] bg-surface px-4 py-3
+${isDragActive ? "border-solid border-[color:var(--accent)] bg-[color:var(--accent-tint)] scale-[1.005]" : "hover:border-[color:var(--accent)] hover:bg-[color:var(--accent-tint)]"}
 ${isUploading ? "pointer-events-none opacity-50" : ""}
 `.trim()}
-      >
-        <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
-          Begin your record
-        </p>
-        <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Drop a screenshot here, or click to upload.</p>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Or paste a screenshot (Ctrl + V)</p>
+          style={{
+            transition:
+              "border-color var(--motion-fast), background-color var(--motion-fast), transform var(--motion-fast)",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <Plus size={16} strokeWidth={1.5} color="var(--text-muted)" aria-hidden />
+            <span
+              style={{
+                fontFamily: "var(--font-serif)",
+                fontSize: "16px",
+                fontWeight: 400,
+                color: "var(--text-primary)",
+              }}
+            >
+              Add a screenshot
+            </span>
+          </div>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "11px",
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+            }}
+          >
+            Drop here · Paste · Ctrl + V
+          </span>
+        </div>
+      ) : (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={openFilePicker}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              openFilePicker();
+            }
+          }}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          className={`
+cursor-pointer rounded-2xl border-[1.5px] border-dashed border-[color:var(--border-strong)] bg-surface px-8 py-16 text-center transition-all duration-150 ease-in-out
+${isDragActive ? "bg-surface-muted scale-[1.01]" : "hover:bg-surface-muted"}
+${isUploading ? "pointer-events-none opacity-50" : ""}
+`.trim()}
+        >
+          <p className="text-[24px] font-normal italic leading-[1.2] text-foreground" style={{ fontFamily: "var(--font-serif)" }}>
+            Begin your record
+          </p>
+          <p className="mt-2 text-[15px] font-normal text-muted" style={{ fontFamily: "var(--font-serif)" }}>
+            Drop a screenshot here, or click to upload.
+          </p>
+          <p className="mt-3 text-[10px] uppercase tracking-[0.15em] text-muted" style={{ fontFamily: "var(--font-mono)" }}>
+            OR PASTE A SCREENSHOT (CTRL + V)
+          </p>
 
-        {isUploading && (
-          <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">Saving screenshot...</p>
-        )}
-        {isPasting && (
-          <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">Reading from clipboard...</p>
-        )}
-      </div>
+          {isUploading && (
+            <p className="app-body mt-4 text-sm">Saving screenshot...</p>
+          )}
+          {isPasting && (
+            <p className="app-body mt-2 text-sm">Reading from clipboard...</p>
+          )}
+        </div>
+      )}
 
       {successMessage && (
         <div className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800 transition">

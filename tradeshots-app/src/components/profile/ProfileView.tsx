@@ -300,10 +300,10 @@ export default function ProfileView({
             type="button"
             onClick={() => void toggleFollow()}
             disabled={followPending}
-            className={`rounded-md border px-3 py-1.5 text-sm transition-all duration-150 ease-in-out disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`btn btn-secondary disabled:cursor-not-allowed disabled:opacity-60 ${
               isFollowing
-                ? "border-black bg-black text-white hover:opacity-90"
-                : "border-gray-300 bg-white text-gray-900 hover:bg-gray-100"
+                ? "opacity-80"
+                : ""
             }`}
           >
             {isFollowing ? "Following" : "Follow"}
@@ -349,7 +349,7 @@ export default function ProfileView({
                 }}
                 className="group micro-card overflow-hidden rounded-2xl border border-gray-200 bg-white text-left shadow-sm dark:border-gray-700 dark:bg-gray-900"
               >
-                <div className="relative h-40 w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+                <div className="relative h-40 w-full overflow-hidden ui-media-placeholder">
                   {item.displayCover ? (
                     <Image
                       src={item.displayCover}
@@ -361,7 +361,7 @@ export default function ProfileView({
                       draggable={false}
                     />
                   ) : null}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
+                  <div className="ui-media-overlay pointer-events-none absolute inset-x-0 bottom-0 h-16" />
                   <span className="absolute right-2 top-2 rounded-full bg-black/75 px-2.5 py-0.5 text-xs font-medium text-white opacity-90 transition-opacity duration-200 ease-out group-hover:opacity-100">
                     {item.is_paid ? `€${Number(item.price ?? 0).toFixed(0)}` : "Free"}
                   </span>
@@ -370,14 +370,8 @@ export default function ProfileView({
                   </p>
                 </div>
                 <div className="space-y-2 p-4">
-                  <p className="line-clamp-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {item.name || "Playbook"}
-                  </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                     {item.screenshotCount} screenshots • {primaryAsset}
-                  </p>
-                  <p className="truncate text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                    {resolvedProfile?.username ?? "Unknown"}
                   </p>
                 </div>
               </button>

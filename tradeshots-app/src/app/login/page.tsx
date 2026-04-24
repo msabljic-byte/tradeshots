@@ -74,12 +74,14 @@ function LoginPageInner() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="flex w-full max-w-md flex-col items-center gap-4">
-        <Logo />
+        <Logo variant="stacked" sealSize="lg" />
+        <AuthForm mode="login" />
+        <p className="text-label text-muted text-center">Or continue with</p>
         <button
           type="button"
           onClick={handleGoogleLogin}
           disabled={oauthLoading}
-          className="app-button-text group flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-gray-900 transition hover:bg-gray-100 disabled:opacity-60"
+          className="ui-button app-button-text group flex h-11 w-full items-center justify-center gap-2 px-4 disabled:opacity-60"
         >
           <span aria-hidden="true" className="inline-flex items-center justify-center">
             <Globe size={20} className="text-gray-600 transition-colors group-hover:text-black" aria-hidden />
@@ -93,12 +95,10 @@ function LoginPageInner() {
           </div>
         )}
 
-        <AuthForm mode="login" />
-
         <p className="app-body text-center">
           Need an account?{" "}
           <Link
-            className="font-medium text-gray-900 underline underline-offset-4 hover:text-gray-700"
+            className="text-label text-muted hover:text-foreground"
             href="/signup"
           >
             Sign up

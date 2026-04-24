@@ -1,15 +1,9 @@
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <rect x="8" y="8" width="48" height="48" rx="10" fill="#dc2626"/>
-  <text
-    x="32"
-    y="40"
-    text-anchor="middle"
-    font-family="Georgia, 'Times New Roman', serif"
-    font-size="28"
-    font-style="italic"
-    font-weight="700"
-    fill="#ffffff"
-  >
-    S
-  </text>
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="80" height="80" rx="4" fill="#C8442A"/>
+  <rect x="18.8" y="18.8" width="62.4" height="62.4" rx="2" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1.5"/>
+  <path
+    d="M 68.5 32.2 C 68.5 26.8 62.4 23.5 54.0 23.5 C 41.2 23.5 32.5 29.8 32.5 38.8 C 32.5 46.2 38.8 50.2 50.5 53.0 C 59.8 55.2 64.2 57.5 64.2 61.5 C 64.2 66.0 58.5 69.2 50.8 69.2 C 42.2 69.2 36.8 66.2 34.8 61.8 L 31.5 64.5 C 33.8 71.0 42.5 74.5 52.5 74.5 C 64.0 74.5 72.0 69.2 72.0 61.0 C 72.0 53.5 64.8 49.8 53.2 47.0 C 45.2 45.0 41.5 42.8 41.5 38.8 C 41.5 34.2 46.5 31.0 53.5 31.0 C 59.5 31.0 63.8 32.5 66.0 35.5 Z"
+    fill="#FAF7EF"
+    transform="translate(0, 0)"
+  />
 </svg>

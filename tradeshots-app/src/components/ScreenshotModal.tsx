@@ -13,6 +13,20 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { createPortal } from "react-dom";
 
+function getCssColorVar(variable: string) {
+  if (typeof window === "undefined") return "";
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  return value;
+}
+
+function resolveTokenColor(primaryVariable: string, fallbackVariable: string) {
+  return (
+    getCssColorVar(primaryVariable) ||
+    getCssColorVar(fallbackVariable) ||
+    "currentColor"
+  );
+}
+
 export type AnnotationShape =
   | {
       id?: string;
@@ -218,7 +232,8 @@ export default function ScreenshotModal({
         if (kind === "path" || kind === "draw") {
           const pts = (a as any).points ?? [];
           if (pts.length < 2) continue;
-          ctx.strokeStyle = (a as any).color ?? "#ef4444";
+          ctx.strokeStyle =
+            (a as any).color ?? resolveTokenColor("--annotation-default", "--accent");
           ctx.lineWidth = (a as any).size ?? (a as any).width ?? 2;
           ctx.lineCap = "round";
           ctx.beginPath();
@@ -230,7 +245,8 @@ export default function ScreenshotModal({
           const fromY = (a as any).fromY;
           const toX = (a as any).toX;
           const toY = (a as any).toY;
-          const color = (a as any).color ?? "#ef4444";
+          const color =
+            (a as any).color ?? resolveTokenColor("--annotation-default", "--accent");
           const width = (a as any).size ?? (a as any).width ?? 2;
 
           const distance = Math.hypot(toX - fromX, toY - fromY);
@@ -252,7 +268,8 @@ export default function ScreenshotModal({
           ctx.fillStyle = color;
           ctx.fill();
         } else if (kind === "text") {
-          ctx.fillStyle = (a as any).color ?? "#ef4444";
+          ctx.fillStyle =
+            (a as any).color ?? resolveTokenColor("--annotation-default", "--accent");
           const size = Math.max(14, 12 + ((a as any).size ?? 2) * 2);
           ctx.font = `${size}px sans-serif`;
           ctx.textBaseline = "top";
@@ -264,7 +281,8 @@ export default function ScreenshotModal({
           const h = Math.abs((a as any).height ?? 0);
           if (w < 1 || h < 1) continue;
 
-          const color = (a as any).color ?? "#ef4444";
+          const color =
+            (a as any).color ?? resolveTokenColor("--annotation-default", "--accent");
           const opacity = typeof (a as any).opacity === "number" ? (a as any).opacity : 0.18;
 
           ctx.save();

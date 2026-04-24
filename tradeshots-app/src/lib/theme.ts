@@ -4,11 +4,14 @@
  */
 export type ThemeMode = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "theme";
+export const THEME_STORAGE_KEY = "shirumi-theme";
+const LEGACY_THEME_STORAGE_KEY = "theme";
 
 export function getStoredTheme(): ThemeMode | null {
   if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+  const raw =
+    window.localStorage.getItem(THEME_STORAGE_KEY) ??
+    window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
   if (raw === "light" || raw === "dark") return raw;
   return null;
 }

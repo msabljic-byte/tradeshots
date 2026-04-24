@@ -756,6 +756,10 @@ export default function SharedPlaybookView({
         showToast(folderError?.message ?? "Could not create folder");
         return;
       }
+      if (!newFolder) {
+        showToast("Could not create folder");
+        return;
+      }
 
       const copyFolderId = newFolder.id;
       const { error: linkErr } = await supabase.from("user_playbooks").insert({
@@ -1206,9 +1210,9 @@ export default function SharedPlaybookView({
               <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 shadow-sm dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex flex-col items-center justify-center text-center">
                   <MessageCircle size={24} className="text-gray-500 dark:text-gray-400" aria-hidden />
-                  <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">No comments yet</p>
+                  <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">Nothing written yet.</p>
                   <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                    Be the first to share your thoughts
+                    Add the first note.
                   </p>
                   <button
                     type="button"
@@ -1470,9 +1474,9 @@ export default function SharedPlaybookView({
                 draggable={false}
               />
             ) : (
-              <div className="h-full w-full bg-gradient-to-br from-gray-200 to-gray-300" />
+              <div className="h-full w-full ui-media-placeholder" />
             )}
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+            <div className="ui-media-overlay pointer-events-none absolute inset-0" />
 
             <div className="absolute right-4 top-4">{renderPrimaryPreviewCta()}</div>
 
@@ -1594,7 +1598,6 @@ export default function SharedPlaybookView({
             <p className="text-sm font-medium text-gray-900 transition-colors hover:underline dark:text-gray-100">
               {authorName}
             </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Creator</p>
           </div>
         </button>
 
@@ -1646,11 +1649,11 @@ export default function SharedPlaybookView({
         </div>
 
         <div className="flex flex-col items-center justify-center text-center">
-          <p className="mb-2 text-sm text-gray-700 dark:text-gray-300">
+          <p className="mb-3 text-sm text-gray-700 dark:text-gray-300">
             Full access to all screenshots, notes & annotations
           </p>
           {renderPrimaryPreviewCta()}
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {folder.is_paid ? "Instant access after purchase" : "Instant access after import"}
           </p>
         </div>
@@ -1664,9 +1667,9 @@ export default function SharedPlaybookView({
             <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 shadow-sm dark:border-gray-700 dark:bg-gray-900">
               <div className="flex flex-col items-center justify-center text-center">
                 <MessageCircle size={24} className="text-gray-500 dark:text-gray-400" aria-hidden />
-                <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">No comments yet</p>
+                <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">Nothing written yet.</p>
                 <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                  Be the first to share your thoughts
+                  Add the first note.
                 </p>
                 <button
                   type="button"
@@ -1768,7 +1771,7 @@ export default function SharedPlaybookView({
                               {reply.username}
                             </span>
                             {reply.isAuthor ? (
-                              <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] text-blue-600">
+                              <span className="ui-tag ui-tag-primary">
                                 Author
                               </span>
                             ) : null}

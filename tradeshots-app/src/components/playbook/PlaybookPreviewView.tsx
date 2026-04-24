@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
-import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { Download, FileText, Heart, MessageCircle, Mic, Pencil } from "lucide-react";
 import ScreenshotModal from "@/components/ScreenshotModal";
@@ -894,10 +893,10 @@ export default function PlaybookPreviewView({
             draggable={false}
           />
         ) : (
-          <div className="h-full w-full bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-800 dark:to-gray-700" />
+          <div className="h-full w-full ui-media-placeholder" />
         )}
 
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+        <div className="ui-media-overlay absolute inset-0" />
 
         <div className="absolute bottom-4 left-4 text-white">
           <h1 className="text-2xl font-semibold text-gray-100">{playbook?.name ?? "Playbook Preview"}</h1>
@@ -938,7 +937,7 @@ export default function PlaybookPreviewView({
         </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
@@ -1004,7 +1003,7 @@ export default function PlaybookPreviewView({
         ) : null}
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-6">
         <div className="space-y-2">
           <h2 className="text-lg font-medium text-gray-800 dark:text-gray-200">Playbook Preview</h2>
           <p className="text-sm text-gray-700 dark:text-gray-300">{previewText}</p>
@@ -1038,9 +1037,7 @@ export default function PlaybookPreviewView({
               />
               {isBlurred ? (
                 <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur-sm">
-                  <span className="text-sm font-medium text-white">
-                    🔒 Unlock full playbook
-                  </span>
+                  <span className="text-sm font-medium text-white">Unlock full playbook</span>
                 </div>
               ) : null}
             </button>
@@ -1089,7 +1086,7 @@ export default function PlaybookPreviewView({
       </div>
 
       <div className="flex flex-col items-center justify-center text-center">
-        <p className="mb-2 text-sm text-gray-700 dark:text-gray-300">
+        <p className="mb-3 text-sm text-gray-700 dark:text-gray-300">
           Full access to all screenshots, notes & annotations
         </p>
         <button
@@ -1099,7 +1096,7 @@ export default function PlaybookPreviewView({
         >
           {ctaLabel}
         </button>
-        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
           {resolvedPlaybook?.is_paid ? "Instant access after purchase" : "Instant access after import"}
         </p>
       </div>
@@ -1138,9 +1135,7 @@ export default function PlaybookPreviewView({
                   </div>
                   <div className="space-y-1 p-3">
                     <p className="line-clamp-1 text-sm font-medium text-gray-900 dark:text-gray-100">{item.name}</p>
-                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      {item.screenshotCount} screenshots • {primaryAsset}
-                    </p>
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{primaryAsset}</p>
                   </div>
                 </button>
               );

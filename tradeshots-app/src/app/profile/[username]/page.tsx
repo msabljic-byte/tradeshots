@@ -316,14 +316,14 @@ export default function AuthorProfilePage() {
           <div className="flex flex-col items-center justify-center text-center">
             <FolderOpen size={28} className="text-gray-500 dark:text-gray-400" aria-hidden />
             <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">
-              Create your first playbook
+              Nothing saved yet.
             </p>
             <button
               type="button"
               onClick={() => router.push("/dashboard")}
               className="mt-4 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90"
             >
-              Upload screenshot
+              Begin your record
             </button>
           </div>
         </div>
@@ -341,7 +341,7 @@ export default function AuthorProfilePage() {
                 onClick={() => router.push(`/playbook/${encodeURIComponent(item.share_id)}`)}
                 className="group micro-card overflow-hidden rounded-2xl border border-gray-200 bg-white text-left shadow-sm dark:border-gray-700 dark:bg-gray-900"
               >
-                <div className="relative h-40 w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+                <div className="relative h-40 w-full overflow-hidden ui-media-placeholder">
                   {item.displayCover ? (
                     <Image
                       src={item.displayCover}
@@ -353,7 +353,7 @@ export default function AuthorProfilePage() {
                       draggable={false}
                     />
                   ) : null}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 to-transparent" />
+                  <div className="ui-media-overlay pointer-events-none absolute inset-x-0 bottom-0 h-16" />
                   <span className="absolute right-2 top-2 rounded-full bg-black/75 px-2.5 py-0.5 text-xs font-medium text-white opacity-90 transition-opacity duration-200 ease-out group-hover:opacity-100">
                     {item.is_paid ? `€${Number(item.price ?? 0).toFixed(0)}` : "Free"}
                   </span>

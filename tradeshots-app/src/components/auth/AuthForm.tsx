@@ -80,7 +80,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
         } = await supabase.auth.getSession();
 
         if (session) router.replace("/dashboard");
-        else setError("Check your email to confirm your account.");
+        else setError("Check your email to confirm your account, then continue.");
         return;
       }
 
@@ -188,7 +188,7 @@ export default function AuthForm({ mode }: { mode: AuthMode }) {
             <div className="mt-1 flex justify-end">
               <Link
                 href="/reset-password"
-                className="app-button-text text-gray-700 hover:text-black"
+                className="text-label text-muted hover:text-foreground"
               >
                 Forgot password?
               </Link>
