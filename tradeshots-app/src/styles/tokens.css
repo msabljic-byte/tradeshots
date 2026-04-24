@@ -6,8 +6,8 @@
 
 :root {
   /* Font families (wired to Next font vars in layout). */
-  --font-family-sans: var(--font-geist-sans), Arial, Helvetica, sans-serif;
-  --font-family-mono: var(--font-geist-mono), "Courier New", Courier, monospace;
+  --font-family-serif: var(--font-shirumi-serif), Georgia, "Times New Roman", serif;
+  --font-family-mono: var(--font-shirumi-mono), "Courier New", Courier, monospace;
 
   /* Typography scale. */
   --font-size-xs: 0.75rem;
@@ -42,43 +42,89 @@
   --motion-duration-slow: 0.2s;
   --motion-ease-standard: ease-in-out;
   --motion-ease-out: ease-out;
+
+  /* Theme transition */
+  --theme-transition-duration: 0.2s;
+  --theme-transition-ease: ease-in-out;
+
+  /* Accent highlights */
+  --highlight-new-ring-low: rgba(59, 130, 246, 0.12);
+  --highlight-new-glow-low: rgba(59, 130, 246, 0.2);
+  --highlight-new-ring-high: rgba(59, 130, 246, 0.28);
+  --highlight-new-glow-high: rgba(59, 130, 246, 0.42);
+  --highlight-updated-ring-low: rgba(245, 158, 11, 0.14);
+  --highlight-updated-glow-low: rgba(245, 158, 11, 0.18);
+  --highlight-updated-ring-high: rgba(245, 158, 11, 0.32);
+  --highlight-updated-glow-high: rgba(251, 191, 36, 0.38);
 }
 
 :root,
 :root[data-theme="light"] {
-  --background: #f9fafb;
-  --foreground: #111827;
-  --surface: #ffffff;
-  --surface-muted: #f3f4f6;
-  --border: #e5e7eb;
-  --text-muted: #6b7280;
-  --primary: #111827;
-  --primary-foreground: #ffffff;
+  --bg-app: #f9fafb;
+  --bg-surface: #ffffff;
+  --bg-surface-muted: #f3f4f6;
+  --bg-hover-subtle: #eef2f7;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-inverse: #ffffff;
+  --border-default: #e5e7eb;
+  --accent: #111827;
+  --accent-foreground: #ffffff;
   --danger: #dc2626;
+
+  --ui-dark-700: rgb(55 65 81);
+  --ui-dark-800: rgb(31 41 55);
+  --ui-dark-900: rgb(17 24 39);
+  --ui-dark-text-100: rgb(243 244 246);
+  --ui-dark-text-200: rgb(229 231 235);
+  --ui-dark-text-400: rgb(156 163 175);
 }
 
 :root[data-theme="dark"] {
-  --background: #0b1220;
-  --foreground: #e5e7eb;
-  --surface: #111827;
-  --surface-muted: #1f2937;
-  --border: #374151;
-  --text-muted: #9ca3af;
-  --primary: #e5e7eb;
-  --primary-foreground: #111827;
+  --bg-app: #0b1220;
+  --bg-surface: #111827;
+  --bg-surface-muted: #1f2937;
+  --bg-hover-subtle: #243041;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-inverse: #111827;
+  --border-default: #374151;
+  --accent: #e5e7eb;
+  --accent-foreground: #111827;
   --danger: #f87171;
+
+  --ui-dark-700: rgb(55 65 81);
+  --ui-dark-800: rgb(31 41 55);
+  --ui-dark-900: rgb(17 24 39);
+  --ui-dark-text-100: rgb(243 244 246);
+  --ui-dark-text-200: rgb(229 231 235);
+  --ui-dark-text-400: rgb(156 163 175);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --surface: #111827;
-    --surface-muted: #1f2937;
-    --border: #374151;
-    --text-muted: #9ca3af;
-    --primary: #e5e7eb;
-    --primary-foreground: #111827;
+    --bg-app: #0a0a0a;
+    --bg-surface: #111827;
+    --bg-surface-muted: #1f2937;
+    --bg-hover-subtle: #243041;
+    --text-primary: #ededed;
+    --text-secondary: #9ca3af;
+    --text-inverse: #111827;
+    --border-default: #374151;
+    --accent: #e5e7eb;
+    --accent-foreground: #111827;
     --danger: #f87171;
   }
+}
+
+/* Backward-compatible aliases during token migration. */
+:root {
+  --background: var(--bg-app);
+  --foreground: var(--text-primary);
+  --surface: var(--bg-surface);
+  --surface-muted: var(--bg-surface-muted);
+  --border: var(--border-default);
+  --text-muted: var(--text-secondary);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-foreground);
 }

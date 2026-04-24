@@ -10,49 +10,77 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-surface: var(--surface);
-  --color-surface-muted: var(--surface-muted);
-  --color-border: var(--border);
-  --color-text-muted: var(--text-muted);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
+  --color-background: var(--bg-app);
+  --color-foreground: var(--text-primary);
+  --color-surface: var(--bg-surface);
+  --color-surface-muted: var(--bg-surface-muted);
+  --color-border: var(--border-default);
+  --color-text-muted: var(--text-secondary);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-foreground);
   --color-danger: var(--danger);
-  --font-sans: var(--font-family-sans);
+  --font-sans: var(--font-family-serif);
   --font-mono: var(--font-family-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-family-serif), Georgia, "Times New Roman", serif;
   font-size: 14px; /* 0.875rem = Tailwind text-sm */
   line-height: 1.5; /* Tailwind leading-6 */
 }
 
-/* Avoid color/opacity flicker while swapping theme tokens. */
-:root.theme-changing *,
-:root.theme-changing *::before,
-:root.theme-changing *::after {
-  transition: none !important;
+.text-h1 {
+  @apply text-2xl font-semibold leading-tight;
+  font-family: var(--font-family-serif);
+}
+
+.text-h2 {
+  @apply text-lg font-medium leading-snug;
+  font-family: var(--font-family-serif);
+}
+
+.text-body {
+  @apply text-sm leading-6;
+  font-family: var(--font-family-serif);
+}
+
+.text-label {
+  @apply text-xs uppercase tracking-wide leading-4;
+  font-family: var(--font-family-mono);
+}
+
+.text-meta,
+.text-ui,
+.text-badge {
+  font-family: var(--font-family-mono);
+}
+
+/* Theme transitions */
+*,
+*::before,
+*::after {
+  transition-property: background-color, color, border-color, box-shadow, fill, stroke;
+  transition-duration: var(--theme-transition-duration);
+  transition-timing-function: var(--theme-transition-ease);
 }
 
 /* Semantic helpers for component migration. */
 .bg-surface {
-  background-color: var(--surface);
+  background-color: var(--bg-surface);
 }
 
 .bg-surface-muted {
-  background-color: var(--surface-muted);
+  background-color: var(--bg-surface-muted);
 }
 
 .text-muted {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .border-default {
-  border-color: var(--border);
+  border-color: var(--border-default);
 }
 
 @layer base {
@@ -79,17 +107,28 @@ body {
 
   /* Global typography baseline (keeps hierarchy clean & readable). */
   h1 {
-    @apply text-2xl font-semibold text-gray-900 dark:text-gray-100 leading-tight;
+    @apply text-h1 text-gray-900 dark:text-gray-100;
   }
   h2,
   h3 {
-    @apply text-lg font-medium text-gray-800 dark:text-gray-200 leading-snug;
+    @apply text-h2 text-gray-800 dark:text-gray-200;
   }
   p {
-    @apply text-sm text-gray-700 dark:text-gray-300 leading-6;
+    @apply text-body text-gray-700 dark:text-gray-300;
   }
   small {
-    @apply text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide leading-4;
+    @apply text-label text-gray-500 dark:text-gray-400;
+  }
+  label {
+    font-family: var(--font-family-mono);
+  }
+  th,
+  [role="columnheader"] {
+    font-family: var(--font-family-mono);
+  }
+  time,
+  kbd {
+    font-family: var(--font-family-mono);
   }
 }
 
@@ -107,22 +146,29 @@ body {
 
   /* Typography helpers (opt-in): use these for consistent hierarchy. */
   .app-page-title {
-    @apply text-2xl font-semibold text-gray-900 dark:text-gray-100;
+    @apply text-h1 text-gray-900 dark:text-gray-100;
   }
   .app-section-title {
-    @apply text-lg font-medium text-gray-800 dark:text-gray-200;
+    @apply text-h2 text-gray-800 dark:text-gray-200;
   }
   .app-body {
-    @apply text-sm text-gray-700 dark:text-gray-300;
+    @apply text-body text-gray-700 dark:text-gray-300;
   }
   .app-label-meta {
-    @apply text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide;
+    @apply text-label text-gray-500 dark:text-gray-400;
   }
   .app-secondary {
     @apply app-label-meta;
   }
   .app-button-text {
     @apply text-sm font-medium;
+    font-family: var(--font-family-mono);
+  }
+  [data-meta],
+  [data-badge],
+  [class*="badge"],
+  [class*="chip"] {
+    font-family: var(--font-family-mono);
   }
   .micro-btn {
     @apply transition-all duration-150 hover:scale-[1.02];
@@ -137,28 +183,29 @@ body {
   /* Premium button system */
   .btn {
     @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 ease-in-out hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-2;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-default);
+    font-family: var(--font-family-mono);
   }
   .btn-primary {
-    background-color: var(--primary);
-    color: var(--primary-foreground);
+    background-color: var(--accent);
+    color: var(--accent-foreground);
   }
   .btn-primary:hover {
     opacity: 0.9;
   }
   .btn-secondary {
-    background-color: var(--surface-muted);
-    color: var(--foreground);
+    background-color: var(--bg-surface-muted);
+    color: var(--text-primary);
   }
   .btn-secondary:hover {
     filter: brightness(0.96);
   }
   .btn-subtle {
     @apply bg-transparent;
-    color: var(--text-muted);
+    color: var(--text-secondary);
   }
   .btn-subtle:hover {
-    color: var(--foreground);
+    color: var(--text-primary);
   }
 
   /* Dropdown / popover entry animation (for conditional renders). */
@@ -177,74 +224,74 @@ body {
   }
 }
 
-/* Safety net: keep existing gray/white utility-heavy UI readable in dark mode. */
-:root[data-theme="dark"] .bg-white {
-  background-color: var(--surface) !important;
+/* Token bridge: map legacy utility-heavy colors to semantic theme tokens. */
+.bg-white {
+  background-color: var(--bg-surface) !important;
 }
 
-:root[data-theme="dark"] .bg-gray-50,
-:root[data-theme="dark"] .bg-gray-100 {
-  background-color: var(--surface-muted) !important;
+.bg-gray-50,
+.bg-gray-100 {
+  background-color: var(--bg-surface-muted) !important;
 }
 
-:root[data-theme="dark"] .border-gray-100,
-:root[data-theme="dark"] .border-gray-200,
-:root[data-theme="dark"] .border-gray-300 {
-  border-color: var(--border) !important;
+.border-gray-100,
+.border-gray-200,
+.border-gray-300 {
+  border-color: var(--border-default) !important;
 }
 
-:root[data-theme="dark"] .text-gray-400,
-:root[data-theme="dark"] .text-gray-500,
-:root[data-theme="dark"] .text-gray-600,
-:root[data-theme="dark"] .text-gray-700,
-:root[data-theme="dark"] .text-gray-800 {
-  color: var(--text-muted) !important;
+.text-gray-400,
+.text-gray-500,
+.text-gray-600,
+.text-gray-700,
+.text-gray-800 {
+  color: var(--text-secondary) !important;
 }
 
-:root[data-theme="dark"] .text-gray-900,
-:root[data-theme="dark"] .text-black {
-  color: var(--foreground) !important;
+.text-gray-900,
+.text-black {
+  color: var(--text-primary) !important;
 }
 
-:root[data-theme="dark"] .hover\:bg-gray-100:hover {
-  background-color: #243041 !important;
+.hover\:bg-gray-100:hover {
+  background-color: var(--bg-hover-subtle) !important;
 }
 
-:root[data-theme="dark"] .hover\:text-black:hover {
-  color: var(--foreground) !important;
+.hover\:text-black:hover {
+  color: var(--text-primary) !important;
 }
 
-/* Ensure explicit Tailwind dark utilities win over legacy gray safety-net rules above. */
+/* Ensure explicit Tailwind dark utilities still win when used intentionally. */
 :root[data-theme="dark"] .dark\:bg-gray-700 {
-  background-color: rgb(55 65 81) !important;
+  background-color: var(--ui-dark-700) !important;
 }
 
 :root[data-theme="dark"] .dark\:bg-gray-800 {
-  background-color: rgb(31 41 55) !important;
+  background-color: var(--ui-dark-800) !important;
 }
 
 :root[data-theme="dark"] .dark\:bg-gray-900 {
-  background-color: rgb(17 24 39) !important;
+  background-color: var(--ui-dark-900) !important;
 }
 
 :root[data-theme="dark"] .dark\:text-gray-100 {
-  color: rgb(243 244 246) !important;
+  color: var(--ui-dark-text-100) !important;
 }
 
 :root[data-theme="dark"] .dark\:text-gray-200 {
-  color: rgb(229 231 235) !important;
+  color: var(--ui-dark-text-200) !important;
 }
 
 :root[data-theme="dark"] .dark\:text-gray-400 {
-  color: rgb(156 163 175) !important;
+  color: var(--ui-dark-text-400) !important;
 }
 
 :root[data-theme="dark"] .dark\:hover\:bg-gray-700:hover {
-  background-color: rgb(55 65 81) !important;
+  background-color: var(--ui-dark-700) !important;
 }
 
 :root[data-theme="dark"] .dark\:hover\:text-gray-200:hover {
-  color: rgb(229 231 235) !important;
+  color: var(--ui-dark-text-200) !important;
 }
 
 @keyframes fadeIn {
@@ -297,13 +344,13 @@ body {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgba(59, 130, 246, 0.12),
-      0 8px 28px -14px rgba(59, 130, 246, 0.2);
+      0 0 0 1px var(--highlight-new-ring-low),
+      0 8px 28px -14px var(--highlight-new-glow-low);
   }
   45% {
     box-shadow:
-      0 0 0 1px rgba(59, 130, 246, 0.28),
-      0 10px 36px -10px rgba(59, 130, 246, 0.42);
+      0 0 0 1px var(--highlight-new-ring-high),
+      0 10px 36px -10px var(--highlight-new-glow-high);
   }
 }
 
@@ -311,13 +358,13 @@ body {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgba(245, 158, 11, 0.14),
-      0 8px 28px -14px rgba(245, 158, 11, 0.18);
+      0 0 0 1px var(--highlight-updated-ring-low),
+      0 8px 28px -14px var(--highlight-updated-glow-low);
   }
   45% {
     box-shadow:
-      0 0 0 1px rgba(245, 158, 11, 0.32),
-      0 10px 36px -10px rgba(251, 191, 36, 0.38);
+      0 0 0 1px var(--highlight-updated-ring-high),
+      0 10px 36px -10px var(--highlight-updated-glow-high);
   }
 }
 
@@ -361,14 +408,14 @@ body {
 }
 
 :root[data-theme="dark"] .voice-memo-audio {
-  background-color: var(--surface-muted);
+  background-color: var(--bg-surface-muted);
   color-scheme: dark;
 }
 
 :root[data-theme="dark"] .voice-memo-audio::-webkit-media-controls-panel {
-  background-color: var(--surface-muted);
+  background-color: var(--bg-surface-muted);
 }
 
 :root[data-theme="dark"] .voice-memo-audio::-webkit-media-controls-enclosure {
-  background-color: var(--surface-muted);
+  background-color: var(--bg-surface-muted);
 }

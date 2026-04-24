@@ -1,20 +1,21 @@
 /**
  * Root layout for the Tradeshots Next.js app (App Router).
- * - Loads Geist fonts and global CSS.
+ * - Loads Shirumi typography fonts and global CSS.
  * - Injects a tiny inline script before paint to set `data-theme` from localStorage or system preference,
  *   avoiding a flash of wrong theme on hard reload (pairs with `src/lib/theme.ts` and `globals.css`).
  */
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fraunces, JetBrains_Mono } from "next/font/google";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const shirumiSerif = Fraunces({
+  variable: "--font-shirumi-serif",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const shirumiMono = JetBrains_Mono({
+  variable: "--font-shirumi-mono",
   subsets: ["latin"],
 });
 
@@ -31,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${shirumiSerif.variable} ${shirumiMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
@@ -55,6 +56,7 @@ export default function RootLayout({
         className="min-h-full flex flex-col bg-background text-foreground font-sans text-sm leading-6"
         suppressHydrationWarning
       >
+        <ThemeToggle />
         {children}
       </body>
     </html>

@@ -1,6 +1,6 @@
 /**
  * Client-side theme helpers: read/write `localStorage`, apply `data-theme` on `<html>`,
- * and briefly add `theme-changing` to suppress transition flicker (see `globals.css`).
+ * and keep persistent app-wide light/dark mode.
  */
 export type ThemeMode = "light" | "dark";
 
@@ -15,15 +15,7 @@ export function getStoredTheme(): ThemeMode | null {
 
 export function applyTheme(theme: ThemeMode) {
   if (typeof document === "undefined") return;
-  const root = document.documentElement;
-
-  // Prevent visible flicker by disabling transitions for one frame while
-  // the data-theme attribute swaps and styles recalculate.
-  root.classList.add("theme-changing");
   document.documentElement.setAttribute("data-theme", theme);
-  window.setTimeout(() => {
-    root.classList.remove("theme-changing");
-  }, 80);
 }
 
 export function setStoredTheme(theme: ThemeMode) {
