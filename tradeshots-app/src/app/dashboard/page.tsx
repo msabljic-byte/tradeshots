@@ -30,11 +30,14 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import MarketplaceView, {
+  type MarketplaceAuthorProfile,
   type MarketplacePlaybook,
 } from "@/components/marketplace/MarketplaceView";
 import PlaybookPreviewView, {
+  type PlaybookAuthorProfile,
   type SelectedPlaybook,
 } from "@/components/playbook/PlaybookPreviewView";
+import ProfileView, { type ProfileIdentity } from "@/components/profile/ProfileView";
 import { supabase } from "@/lib/supabaseClient";
 import {
   syncSharedPlaybookAndNotifyImporters,
@@ -236,6 +239,7 @@ function parseAnnotationValue(raw: unknown): {
 }
 
 const LOCAL_ANNOTATIONS_KEY = "tradeshots.localAnnotations.v1";
+const DISMISSED_HINTS_KEY = "tradeshots.dismissedHints.v1";
 
 function readLocalAnnotations(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -263,6 +267,29 @@ function writeLocalAnnotation(screenshotId: string, annotationPayload: string) {
 function getLocalAnnotation(screenshotId: string): string | null {
   const existing = readLocalAnnotations();
   return existing[screenshotId] ?? null;
+}
+
+function readDismissedHints(): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_HINTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDismissedHint(hintKey: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const existing = readDismissedHints();
+    existing[hintKey] = true;
+    window.localStorage.setItem(DISMISSED_HINTS_KEY, JSON.stringify(existing));
+  } catch {
+    // Ignore localStorage write failures.
+  }
 }
 
 /** Normalize rows from Supabase (column names vary by schema / PostgREST) */
@@ -341,7 +368,10 @@ function getNotificationIcon(
     case "import":
       return <Download className={common} />;
     case "update":
+    case "playbook_update":
       return <RefreshCw className={common} />;
+    case "new_playbook":
+      return <Sparkles className={common} />;
     case "payment":
       return <CreditCard className={common} />;
     case "comment":
@@ -353,6 +383,28 @@ function getNotificationIcon(
   }
 }
 
+function getNotificationGroupLabel(type: string | null | undefined): string {
+  if (type === "comment") return "Comments";
+  if (type === "reply") return "Replies";
+  if (type === "new_playbook") return "New playbooks";
+  if (type === "update" || type === "playbook_update") return "Updates";
+  return "Other";
+}
+
+function formatNotificationTimestamp(createdAt: string | null | undefined): string {
+  const ts = new Date(createdAt ?? "").getTime();
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  const diffMs = Date.now() - ts;
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diffMs < minute) return "Just now";
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}m ago`;
+  if (diffMs < day) return `${Math.max(1, Math.floor(diffMs / hour))}h ago`;
+  if (diffMs < 7 * day) return `${Math.max(1, Math.floor(diffMs / day))}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
 /**
  * Single-page dashboard: sidebar (folders, profile, notifications), main grid, screenshot modal/editor.
  * All handlers close over Supabase; prefer `fetchScreenshots` / `fetchFolders` after mutations.
@@ -362,32 +414,46 @@ function DashboardPageContent() {
   const searchParams = useSearchParams();
   const requestedFolderId = searchParams.get("folderId");
   const requestedOpenFirstShot = searchParams.get("openFirstShot") === "1";
-  const [activeView, setActiveView] = useState<"dashboard" | "marketplace" | "playbook">(() =>
+  const [activeView, setActiveView] = useState<"dashboard" | "marketplace" | "playbook" | "profile">(() =>
     searchParams.get("view") === "marketplace"
       ? "marketplace"
       : searchParams.get("view") === "playbook"
       ? "playbook"
+      : searchParams.get("view") === "profile"
+      ? "profile"
       : "dashboard"
   );
   const [selectedPlaybook, setSelectedPlaybook] = useState<SelectedPlaybook | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<ProfileIdentity | null>(null);
 
   const navigateDashboardView = useCallback(
-    (next: "dashboard" | "marketplace" | "playbook") => {
+    (next: "dashboard" | "marketplace" | "playbook" | "profile", username?: string) => {
       setActiveView(next);
+      if (next === "marketplace" && !dismissedMarketplaceHint) {
+        setShowMarketplaceHint(true);
+      }
       const params = new URLSearchParams(searchParams.toString());
       if (next === "marketplace") {
         params.set("view", "marketplace");
         params.delete("playbook");
+        params.delete("profile");
       } else if (next === "playbook") {
         params.set("view", "playbook");
+        params.delete("profile");
+      } else if (next === "profile") {
+        params.set("view", "profile");
+        if (username) params.set("profile", username);
+        else params.delete("profile");
+        params.delete("playbook");
       } else {
         params.delete("view");
         params.delete("playbook");
+        params.delete("profile");
       }
       const qs = params.toString();
       router.replace(qs ? `/dashboard?${qs}` : `/dashboard`);
     },
-    [router, searchParams]
+    [dismissedMarketplaceHint, router, searchParams]
   );
   const openPlaybookPreview = useCallback(
     (playbook: MarketplacePlaybook) => {
@@ -401,6 +467,19 @@ function DashboardPageContent() {
       router.replace(qs ? `/dashboard?${qs}` : "/dashboard?view=playbook");
     },
     [router, searchParams]
+  );
+  const openAuthorProfile = useCallback(
+    (author: PlaybookAuthorProfile | MarketplaceAuthorProfile) => {
+      const username = String(author.username ?? "").trim();
+      if (!username) return;
+      setSelectedProfile({
+        userId: String(author.userId ?? "").trim(),
+        username,
+        avatarUrl: String(author.avatarUrl ?? "").trim(),
+      });
+      navigateDashboardView("profile", username);
+    },
+    [navigateDashboardView]
   );
   const [email, setEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -494,6 +573,7 @@ function DashboardPageContent() {
   const didAutoOpenFirstShotRef = useRef(false);
   const didApplyRequestedFolderRef = useRef(false);
   const screenshotsGridRef = useRef<HTMLDivElement | null>(null);
+  const uploaderSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [currentNote, setCurrentNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -507,6 +587,11 @@ function DashboardPageContent() {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<string>("");
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<string>("");
+  const isFirstTimeUser = folders.length === 0 && allScreenshots.length === 0;
+  const [dismissedPostUploadHint, setDismissedPostUploadHint] = useState(false);
+  const [dismissedMarketplaceHint, setDismissedMarketplaceHint] = useState(false);
+  const [showPostUploadHint, setShowPostUploadHint] = useState(false);
+  const [showMarketplaceHint, setShowMarketplaceHint] = useState(false);
   const [attributes, setAttributes] = useState<any[]>([]);
   const [attributesDirty, setAttributesDirty] = useState(false);
   const [undoData, setUndoData] = useState<{
@@ -576,6 +661,14 @@ function DashboardPageContent() {
       ? "⌘ to select • ⇧ to select range"
       : "Ctrl to select • Shift to select range";
 
+  const handleUploadComplete = useCallback(async () => {
+    const hadNoScreenshots = allScreenshots.length === 0;
+    await fetchScreenshots();
+    if (hadNoScreenshots && !dismissedPostUploadHint) {
+      setShowPostUploadHint(true);
+    }
+  }, [allScreenshots.length, dismissedPostUploadHint]);
+
   // --- Toast helpers & lazy image tracking ---
   function handleImageLoaded(id: string) {
     setLoadedImages((prev) => ({ ...prev, [id]: true }));
@@ -619,6 +712,20 @@ function DashboardPageContent() {
     setThemeMode(initial);
     applyTheme(initial);
   }, []);
+
+  // useEffect: restore dismissed contextual hints from localStorage.
+  useEffect(() => {
+    const dismissed = readDismissedHints();
+    setDismissedPostUploadHint(Boolean(dismissed.postUploadNotesOrAnnotations));
+    setDismissedMarketplaceHint(Boolean(dismissed.marketplaceImportPlaybooks));
+  }, []);
+
+  // useEffect: surface marketplace hint when arriving via URL state too.
+  useEffect(() => {
+    if (activeView === "marketplace" && !dismissedMarketplaceHint) {
+      setShowMarketplaceHint(true);
+    }
+  }, [activeView, dismissedMarketplaceHint]);
 
   function handleToggleTheme() {
     const next = toggleTheme(themeMode);
@@ -677,82 +784,100 @@ function DashboardPageContent() {
     );
   }
 
-  /** "Playbook updated" rows include `source_folder_id` (author root) and we resolve the importer copy folder. */
+  /** Playbook-related rows include `source_folder_id`; update can open imported copy, others open public preview. */
   function canOpenPlaybookFromNotification(n: NotificationRow): boolean {
-    return Boolean(n.source_folder_id && n.type === "update");
+    return Boolean(n.source_folder_id);
   }
 
   async function openPlaybookFromNotification(n: NotificationRow) {
     const sourceRoot = n.source_folder_id;
-    if (!sourceRoot || n.type !== "update") return;
+    if (!sourceRoot) return;
 
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) return;
 
-    // Multiple imports of the same shared root create multiple rows; `.maybeSingle()` errors on that.
-    const { data: linkRows, error } = await supabase
-      .from("user_playbooks")
-      .select("copy_folder_id")
-      .eq("user_id", auth.user.id)
-      .eq("source_folder_id", sourceRoot)
-      .limit(1);
+    if (n.type === "update" || n.type === "playbook_update") {
+      // Multiple imports of the same shared root create multiple rows; `.maybeSingle()` errors on that.
+      const { data: linkRows, error } = await supabase
+        .from("user_playbooks")
+        .select("copy_folder_id")
+        .eq("user_id", auth.user.id)
+        .eq("source_folder_id", sourceRoot)
+        .limit(1);
 
-    if (error) {
-      console.warn("user_playbooks (notification):", error.message);
+      if (!error) {
+        const copyId = linkRows?.[0]?.copy_folder_id as string | null | undefined;
+        if (copyId) {
+          const { data: folderRows } = await supabase
+            .from("folders")
+            .select("id, parent_id")
+            .eq("user_id", auth.user.id);
+
+          const byId = new Map(
+            (folderRows ?? []).map((f: { id: string; parent_id?: string | null }) => [
+              String(f.id),
+              f,
+            ])
+          );
+
+          setExpandedFolders((prev) => {
+            const next = new Set(prev);
+            let cur: string | null = String(copyId);
+            for (let guard = 0; guard < 48 && cur; guard++) {
+              const f = byId.get(cur);
+              if (!f?.parent_id || String(f.parent_id).length === 0) break;
+              const pid = String(f.parent_id);
+              next.add(pid);
+              cur = pid;
+            }
+            return next;
+          });
+
+          navigateDashboardView("dashboard");
+          setActiveFolderId(String(copyId));
+          setNotificationsOpen(false);
+          await markNotificationRead(n.id);
+          window.setTimeout(() => {
+            screenshotsGridRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }, 80);
+          return;
+        }
+      }
+    }
+
+    const { data: folderRows, error: folderError } = await supabase
+      .from("folders")
+      .select(
+        "id, name, cover_url, is_paid, price, share_id, created_at, updated_at, user_id, asset_types, timeframe, strategy_types, experience_level, has_annotations, has_notes, has_voice"
+      )
+      .eq("id", sourceRoot)
+      .limit(1);
+    if (folderError || !folderRows?.[0]) {
       showToast("Could not open playbook.");
       return;
     }
 
-    const copyId = linkRows?.[0]?.copy_folder_id as string | null | undefined;
-    if (!copyId) {
-      showToast("No imported copy found for this playbook.");
-      return;
-    }
-
-    const { data: folderRows } = await supabase
-      .from("folders")
-      .select("id, parent_id")
-      .eq("user_id", auth.user.id);
-
-    const byId = new Map(
-      (folderRows ?? []).map((f: { id: string; parent_id?: string | null }) => [
-        String(f.id),
-        f,
-      ])
-    );
-
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      let cur: string | null = String(copyId);
-      for (let guard = 0; guard < 48 && cur; guard++) {
-        const f = byId.get(cur);
-        if (!f?.parent_id || String(f.parent_id).length === 0) break;
-        const pid = String(f.parent_id);
-        next.add(pid);
-        cur = pid;
-      }
-      return next;
-    });
-
-    navigateDashboardView("dashboard");
-    setActiveFolderId(String(copyId));
+    openPlaybookPreview(folderRows[0] as MarketplacePlaybook);
     setNotificationsOpen(false);
-
-    await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("id", n.id);
-    await loadNotifications();
-
-    window.setTimeout(() => {
-      screenshotsGridRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }, 80);
+    await markNotificationRead(n.id);
   }
 
   const unreadNotificationCount = notifications.filter((n) => !n.is_read).length;
+  const groupedNotifications = useMemo(() => {
+    const order = ["Comments", "Replies", "New playbooks", "Updates", "Other"] as const;
+    const groups: Record<string, NotificationRow[]> = {};
+    for (const n of notifications) {
+      const label = getNotificationGroupLabel(n.type);
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(n);
+    }
+    return order
+      .filter((label) => (groups[label]?.length ?? 0) > 0)
+      .map((label) => ({ label, items: groups[label] }));
+  }, [notifications]);
 
   function addFilter(key: string, value: string) {
     const normalizedKey = key.trim().toLowerCase();
@@ -1775,6 +1900,18 @@ function DashboardPageContent() {
         setSelectedPlaybook({ share_id: sid, name: "Playbook Preview" });
       }
       setActiveView("playbook");
+      return;
+    }
+    if (v === "profile") {
+      const username = String(searchParams.get("profile") ?? "").trim();
+      if (username) {
+        setSelectedProfile((prev) => ({
+          userId: prev?.userId ?? "",
+          username,
+          avatarUrl: prev?.avatarUrl ?? "",
+        }));
+      }
+      setActiveView("profile");
       return;
     }
     setActiveView("dashboard");
@@ -5016,62 +5153,67 @@ function DashboardPageContent() {
                         </p>
                       </div>
                     ) : (
-                      notifications.map((n) => {
-                        const openable = canOpenPlaybookFromNotification(n);
-                        const markReadOnClick =
-                          (n.type === "comment" || n.type === "reply") &&
-                          !n.is_read;
-                        const clickable = openable || markReadOnClick;
-                        return (
-                          <div
-                            key={n.id}
-                            className={`border-b border-gray-100 last:border-b-0 ${
-                              clickable
-                                ? "cursor-pointer transition-all duration-150 ease-in-out hover:bg-gray-100"
-                                : ""
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              disabled={!clickable}
-                              onClick={() => {
-                                if (openable) {
-                                  void openPlaybookFromNotification(n);
-                                  return;
-                                }
-                                if (markReadOnClick) void markNotificationRead(n.id);
-                              }}
-                              className={`w-full p-3 text-left text-sm ${
-                                n.is_read
-                                  ? "text-gray-500"
-                                  : "font-medium text-gray-900"
-                              } ${
-                                clickable
-                                  ? "cursor-pointer transition-all duration-150 ease-in-out hover:bg-gray-100"
-                                  : "cursor-default"
-                              } disabled:cursor-default disabled:opacity-60`}
-                            >
-                              <div className="flex items-start gap-2">
-                                <span
-                                  className="shrink-0"
-                                  aria-hidden
-                                >
-                                  {getNotificationIcon(n.type)}
-                                </span>
-                                <span className="min-w-0 flex-1">
-                                  {n.message ?? n.type ?? "Notification"}
-                                </span>
-                                {openable && (
-                                  <span className="shrink-0 inline-flex items-center gap-2 text-[10px] text-blue-600">
-                                    Open
-                                    <ChevronRight size={16} aria-hidden />
-                                  </span>
-                                )}
-                              </div>
-                            </button>
+                      groupedNotifications.map((group) => (
+                        <div key={group.label} className="border-b border-gray-100 last:border-b-0">
+                          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            {group.label}
                           </div>
-                        );
-                      })
+                          {group.items.map((n) => {
+                            const openable = canOpenPlaybookFromNotification(n);
+                            const markReadOnClick = !n.is_read;
+                            const clickable = openable || markReadOnClick;
+                            return (
+                              <button
+                                key={n.id}
+                                type="button"
+                                disabled={!clickable}
+                                onClick={() => {
+                                  if (openable) {
+                                    void openPlaybookFromNotification(n);
+                                    return;
+                                  }
+                                  if (markReadOnClick) void markNotificationRead(n.id);
+                                }}
+                                className={`w-full border-t border-gray-100 p-3 text-left text-sm ${
+                                  clickable
+                                    ? "cursor-pointer transition-all duration-150 ease-in-out hover:bg-gray-100"
+                                    : "cursor-default"
+                                } disabled:cursor-default disabled:opacity-60`}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <span className="shrink-0" aria-hidden>
+                                    {getNotificationIcon(n.type)}
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span
+                                      className={`block ${
+                                        n.is_read ? "text-gray-500" : "font-semibold text-gray-900"
+                                      }`}
+                                    >
+                                      {n.message ?? n.type ?? "Notification"}
+                                    </span>
+                                    <span className="mt-0.5 block text-xs text-gray-500">
+                                      {formatNotificationTimestamp(n.created_at)}
+                                    </span>
+                                  </span>
+                                  {!n.is_read ? (
+                                    <span
+                                      className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500"
+                                      aria-label="Unread notification"
+                                    />
+                                  ) : null}
+                                  {openable ? (
+                                    <span className="shrink-0 inline-flex items-center gap-2 text-[10px] text-blue-600">
+                                      Open
+                                      <ChevronRight size={16} aria-hidden />
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))
                     )}
                   </div>
 
@@ -5208,7 +5350,27 @@ function DashboardPageContent() {
                   exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
                   transition={{ duration: 0.22, ease: "easeOut" }}
                 >
-                  <MarketplaceView onOpenPlaybook={openPlaybookPreview} />
+                  {showMarketplaceHint && !dismissedMarketplaceHint ? (
+                    <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100">
+                      <p>Import playbooks to learn from others</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMarketplaceHint(false);
+                          setDismissedMarketplaceHint(true);
+                          writeDismissedHint("marketplaceImportPlaybooks");
+                        }}
+                        className="rounded p-1 text-blue-700 transition hover:bg-blue-100 hover:text-blue-900 dark:text-blue-200 dark:hover:bg-blue-900/50 dark:hover:text-blue-100"
+                        aria-label="Dismiss marketplace hint"
+                      >
+                        <X size={14} aria-hidden />
+                      </button>
+                    </div>
+                  ) : null}
+                  <MarketplaceView
+                    onOpenPlaybook={openPlaybookPreview}
+                    onOpenAuthorProfile={openAuthorProfile}
+                  />
                 </motion.div>
               ) : activeView === "playbook" ? (
                 <motion.div
@@ -5222,6 +5384,22 @@ function DashboardPageContent() {
                   <PlaybookPreviewView
                     playbook={selectedPlaybook}
                     onBack={() => navigateDashboardView("marketplace")}
+                    onOpenAuthorProfile={openAuthorProfile}
+                  />
+                </motion.div>
+              ) : activeView === "profile" ? (
+                <motion.div
+                  key={activeView}
+                  className="w-full"
+                  initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                >
+                  <ProfileView
+                    profile={selectedProfile}
+                    onBack={() => navigateDashboardView("marketplace")}
+                    onOpenPlaybook={openPlaybookPreview}
                   />
                 </motion.div>
               ) : loading ? (
@@ -5247,14 +5425,73 @@ function DashboardPageContent() {
                   transition={{ duration: 0.22, ease: "easeOut" }}
                 >
             <>
+              {isFirstTimeUser ? (
+                <div className="mx-auto flex min-h-[60vh] w-full max-w-3xl flex-col items-center justify-center gap-8">
+                  <div className="w-full rounded-2xl border border-gray-200 bg-white px-6 py-8 text-center shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-10">
+                    <p className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                      Start building your trading playbook
+                    </p>
+                    <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+                      Organize, tag and review your trades like a pro
+                    </p>
+                    <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          uploaderSectionRef.current?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "start",
+                          })
+                        }
+                        className="w-full rounded-md bg-black px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 sm:w-auto"
+                      >
+                        Upload your first screenshot
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigateDashboardView("marketplace")}
+                        className="w-full rounded-md border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-800 transition hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 sm:w-auto"
+                      >
+                        Explore marketplace
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="w-full" ref={uploaderSectionRef}>
+                    <ScreenshotUploader
+                      folderId={activeFolderId}
+                      onUploadComplete={handleUploadComplete}
+                    />
+                  </div>
+                </div>
+              ) : (
+              <>
               <div className="mb-6">
                 <h2 className="text-lg font-medium text-gray-800 dark:text-gray-200">Your Screenshots</h2>
               </div>
 
-              <div className="mb-6">
+              {showPostUploadHint && !dismissedPostUploadHint ? (
+                <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                  <p>Add notes or annotations to capture your setup</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPostUploadHint(false);
+                      setDismissedPostUploadHint(true);
+                      writeDismissedHint("postUploadNotesOrAnnotations");
+                    }}
+                    className="rounded p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                    aria-label="Dismiss upload hint"
+                  >
+                    <X size={14} aria-hidden />
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="mb-6" ref={uploaderSectionRef}>
                 <ScreenshotUploader
                   folderId={activeFolderId}
-                  onUploadComplete={fetchScreenshots}
+                  onUploadComplete={handleUploadComplete}
                 />
               </div>
 
@@ -5263,10 +5500,24 @@ function DashboardPageContent() {
                   <div className="mb-2" aria-hidden>
                     <Upload size={20} className="mx-auto text-gray-600" />
                   </div>
-                  <p className="text-lg font-medium text-gray-800 dark:text-gray-200">No screenshots</p>
+                  <p className="text-lg font-medium text-gray-800 dark:text-gray-200">
+                    Start by uploading your first trade
+                  </p>
                   <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">
                     Drag & drop screenshots to get started
                   </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      uploaderSectionRef.current?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      })
+                    }
+                    className="mt-4 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+                  >
+                    Upload
+                  </button>
                 </div>
               ) : (
               <>
@@ -5832,7 +6083,9 @@ function DashboardPageContent() {
                 </div>
               )}
               </motion.div>
-            </>
+              </>
+              )}
+              </>
               )}
             </>
                 </motion.div>

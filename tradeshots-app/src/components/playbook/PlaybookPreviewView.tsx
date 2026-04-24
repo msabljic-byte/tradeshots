@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { motion } from "framer-motion";
+import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
-import { FileText, Heart, Mic, Pencil } from "lucide-react";
+import { Download, FileText, Heart, MessageCircle, Mic, Pencil } from "lucide-react";
 import ScreenshotModal from "@/components/ScreenshotModal";
 
 export type SelectedPlaybook = {
@@ -21,6 +24,12 @@ export type SelectedPlaybook = {
   has_annotations?: boolean | null;
   has_notes?: boolean | null;
   has_voice?: boolean | null;
+};
+
+export type PlaybookAuthorProfile = {
+  userId: string;
+  username: string;
+  avatarUrl: string;
 };
 
 type PreviewScreenshot = {
@@ -47,8 +56,21 @@ type PlaybookComment = {
   created_at?: string;
   username: string;
   userInitial: string;
+  avatarUrl: string;
   isAuthor: boolean;
   replies: PlaybookComment[];
+};
+
+type AuthorPlaybook = {
+  id: string;
+  name: string;
+  share_id: string;
+  cover_url?: string | null;
+  is_paid?: boolean | null;
+  price?: number | null;
+  asset_types?: string[] | null;
+  screenshotCount: number;
+  displayCover: string;
 };
 
 function parseTradeAttributeRow(
@@ -68,9 +90,11 @@ function parseTradeAttributeRow(
 export default function PlaybookPreviewView({
   playbook,
   onBack,
+  onOpenAuthorProfile,
 }: {
   playbook: SelectedPlaybook | null;
   onBack: () => void;
+  onOpenAuthorProfile?: (author: PlaybookAuthorProfile) => void;
 }) {
   const router = useRouter();
   console.log(playbook);
@@ -80,20 +104,37 @@ export default function PlaybookPreviewView({
   const [previewScreenshots, setPreviewScreenshots] = useState<PreviewScreenshot[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [ownedCopyFolderId, setOwnedCopyFolderId] = useState<string | null>(null);
-  const [authorName, setAuthorName] = useState("Trader");
+  const [authorName, setAuthorName] = useState("Unknown");
+  const [authorUsername, setAuthorUsername] = useState("");
   const [authorAvatarUrl, setAuthorAvatarUrl] = useState("");
   const [resolvedPlaybook, setResolvedPlaybook] = useState<SelectedPlaybook | null>(playbook);
   const [likesCount, setLikesCount] = useState(0);
+  const [importsCount, setImportsCount] = useState(0);
   const [liked, setLiked] = useState(false);
   const [likePending, setLikePending] = useState(false);
+  const [likeBouncing, setLikeBouncing] = useState(false);
   const [authorUserId, setAuthorUserId] = useState("");
   const [comments, setComments] = useState<PlaybookComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newestCommentId, setNewestCommentId] = useState<string | null>(null);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [postingComment, setPostingComment] = useState(false);
   const [activeReplyParentId, setActiveReplyParentId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [postingReplyParentId, setPostingReplyParentId] = useState<string | null>(null);
+  const [moreFromAuthor, setMoreFromAuthor] = useState<AuthorPlaybook[]>([]);
+  const [isFollowingAuthor, setIsFollowingAuthor] = useState(false);
+  const [followPending, setFollowPending] = useState(false);
+
+  function handleOpenAuthorProfile() {
+    if (!authorUsername || !authorUserId) return;
+    onOpenAuthorProfile?.({
+      userId: authorUserId,
+      username: authorUsername,
+      avatarUrl: authorAvatarUrl,
+    });
+  }
 
   useEffect(() => {
     setResolvedPlaybook(playbook);
@@ -254,7 +295,8 @@ export default function PlaybookPreviewView({
       if (!ownerUserId) {
         if (!cancelled) {
           setAuthorUserId("");
-          setAuthorName("Trader");
+          setAuthorUsername("");
+          setAuthorName("Unknown");
           setAuthorAvatarUrl("");
         }
         return;
@@ -262,19 +304,19 @@ export default function PlaybookPreviewView({
       if (!cancelled) setAuthorUserId(ownerUserId);
 
       const authorQuery = await supabase
-        .from("users")
-        .select("name, avatar_url, email")
+        .from("profiles")
+        .select("username, avatar_url")
         .eq("id", ownerUserId)
         .limit(1);
       if (!authorQuery.error && authorQuery.data?.[0]) {
         const row = authorQuery.data[0] as {
-          name?: string | null;
+          username?: string | null;
           avatar_url?: string | null;
-          email?: string | null;
         };
         if (!cancelled) {
-          const fallbackName = String(row.email ?? "").trim() || "Trader";
-          setAuthorName(String(row.name ?? "").trim() || fallbackName);
+          const username = String(row.username ?? "").trim();
+          setAuthorUsername(username);
+          setAuthorName(username || "Unknown");
           setAuthorAvatarUrl(String(row.avatar_url ?? "").trim());
         }
         return;
@@ -286,11 +328,12 @@ export default function PlaybookPreviewView({
         .eq("source_folder_id", playbookId)
         .limit(1);
       if (!cancelled) {
+        setAuthorUsername("");
         const fallbackEmail = String(
           (fallbackAuthor.data?.[0] as { source_owner_email?: string | null } | undefined)
             ?.source_owner_email ?? ""
         ).trim();
-        setAuthorName(fallbackEmail || "Trader");
+        setAuthorName(fallbackEmail || "Unknown");
         setAuthorAvatarUrl("");
       }
     }
@@ -300,6 +343,110 @@ export default function PlaybookPreviewView({
     };
   }, [playbook?.cover_url, playbookId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMoreFromAuthor() {
+      if (!authorUserId) {
+        if (!cancelled) setMoreFromAuthor([]);
+        return;
+      }
+
+      const currentId = String(resolvedPlaybook?.id ?? playbookId).trim();
+      const rowsQuery = await supabase
+        .from("folders")
+        .select("id, name, share_id, cover_url, is_paid, price, asset_types")
+        .eq("user_id", authorUserId)
+        .eq("is_public", true)
+        .not("share_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(8);
+      if (rowsQuery.error) {
+        if (!cancelled) setMoreFromAuthor([]);
+        return;
+      }
+
+      const rows = ((rowsQuery.data ?? []) as Array<Record<string, unknown>>)
+        .map((row) => ({
+          id: String(row.id ?? ""),
+          name: String(row.name ?? "").trim() || "Playbook",
+          share_id: String(row.share_id ?? "").trim(),
+          cover_url: String(row.cover_url ?? "").trim(),
+          is_paid: Boolean(row.is_paid),
+          price: typeof row.price === "number" ? row.price : null,
+          asset_types: Array.isArray(row.asset_types) ? (row.asset_types as string[]) : [],
+        }))
+        .filter((row) => row.id && row.share_id && row.id !== currentId);
+
+      if (rows.length === 0) {
+        if (!cancelled) setMoreFromAuthor([]);
+        return;
+      }
+
+      const ids = rows.map((row) => row.id);
+      const shotsQuery = await supabase
+        .from("screenshots")
+        .select("folder_id, image_url, created_at")
+        .in("folder_id", ids)
+        .order("created_at", { ascending: true });
+
+      const byFolderCover: Record<string, string> = {};
+      const byFolderCount: Record<string, number> = {};
+      if (!shotsQuery.error) {
+        for (const shot of (shotsQuery.data ?? []) as Array<Record<string, unknown>>) {
+          const folderId = String(shot.folder_id ?? "").trim();
+          const imageUrl = String(shot.image_url ?? "").trim();
+          if (!folderId || !imageUrl) continue;
+          if (!byFolderCover[folderId]) byFolderCover[folderId] = imageUrl;
+          byFolderCount[folderId] = (byFolderCount[folderId] ?? 0) + 1;
+        }
+      }
+
+      const normalized: AuthorPlaybook[] = rows.slice(0, 4).map((row) => ({
+        id: row.id,
+        name: row.name,
+        share_id: row.share_id,
+        cover_url: row.cover_url,
+        is_paid: row.is_paid,
+        price: row.price,
+        asset_types: row.asset_types,
+        screenshotCount: byFolderCount[row.id] ?? 0,
+        displayCover: row.cover_url || byFolderCover[row.id] || "",
+      }));
+      if (!cancelled) setMoreFromAuthor(normalized);
+    }
+    void loadMoreFromAuthor();
+    return () => {
+      cancelled = true;
+    };
+  }, [authorUserId, resolvedPlaybook?.id, playbookId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFollowState() {
+      if (!authorUserId) {
+        if (!cancelled) setIsFollowingAuthor(false);
+        return;
+      }
+      const { data: auth } = await supabase.auth.getUser();
+      const followerId = String(auth.user?.id ?? "").trim();
+      if (!followerId || followerId === authorUserId) {
+        if (!cancelled) setIsFollowingAuthor(false);
+        return;
+      }
+      const query = await supabase
+        .from("follows")
+        .select("id")
+        .eq("follower_id", followerId)
+        .eq("following_id", authorUserId)
+        .limit(1);
+      if (!cancelled) setIsFollowingAuthor(Boolean(query.data?.[0]?.id));
+    }
+    void loadFollowState();
+    return () => {
+      cancelled = true;
+    };
+  }, [authorUserId]);
+
   const resolvedPlaybookId = String(resolvedPlaybook?.id ?? playbookId).trim();
 
   useEffect(() => {
@@ -308,21 +455,27 @@ export default function PlaybookPreviewView({
       if (!resolvedPlaybookId) {
         if (!cancelled) {
           setLikesCount(0);
+          setImportsCount(0);
           setLiked(false);
         }
         return;
       }
 
-      const [{ count }, authRes] = await Promise.all([
+      const [{ count }, { count: importCount }, authRes] = await Promise.all([
         supabase
           .from("playbook_likes")
           .select("*", { count: "exact", head: true })
           .eq("playbook_id", resolvedPlaybookId),
+        supabase
+          .from("user_playbooks")
+          .select("*", { count: "exact", head: true })
+          .eq("source_folder_id", resolvedPlaybookId),
         supabase.auth.getUser(),
       ]);
 
       if (cancelled) return;
       setLikesCount(typeof count === "number" ? count : 0);
+      setImportsCount(typeof importCount === "number" ? importCount : 0);
 
       const currentUserId = String(authRes.data.user?.id ?? "").trim();
       if (!currentUserId) {
@@ -348,8 +501,10 @@ export default function PlaybookPreviewView({
   useEffect(() => {
     let cancelled = false;
     async function loadComments() {
+      setCommentsLoading(true);
       if (!resolvedPlaybookId) {
         if (!cancelled) setComments([]);
+        if (!cancelled) setCommentsLoading(false);
         return;
       }
 
@@ -357,11 +512,15 @@ export default function PlaybookPreviewView({
         .from("playbook_comments")
         .select("id, user_id, parent_id, content, created_at")
         .eq("playbook_id", resolvedPlaybookId)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .limit(60);
 
       const rows = (commentsQuery.data ?? []) as Array<Record<string, unknown>>;
       if (commentsQuery.error || rows.length === 0) {
-        if (!cancelled) setComments([]);
+        if (!cancelled) {
+          setComments([]);
+          setCommentsLoading(false);
+        }
         return;
       }
 
@@ -369,16 +528,20 @@ export default function PlaybookPreviewView({
         new Set(rows.map((row) => String(row.user_id ?? "").trim()).filter((value) => value.length > 0))
       );
 
-      let byUserId: Record<string, { name: string; email: string }> = {};
+      let byUserId: Record<string, { name: string; email: string; avatarUrl: string }> = {};
       if (userIds.length > 0) {
-        const usersQuery = await supabase.from("users").select("id, name, email").in("id", userIds);
+        const usersQuery = await supabase
+          .from("profiles")
+          .select("id, username, avatar_url")
+          .in("id", userIds);
         if (!usersQuery.error) {
           byUserId = Object.fromEntries(
             (usersQuery.data ?? []).map((row: Record<string, unknown>) => [
               String(row.id ?? ""),
               {
-                name: String(row.name ?? "").trim(),
-                email: String(row.email ?? "").trim(),
+                name: String(row.username ?? "").trim(),
+                email: "",
+                avatarUrl: String(row.avatar_url ?? "").trim(),
               },
             ])
           );
@@ -388,7 +551,7 @@ export default function PlaybookPreviewView({
       const normalizedRows: PlaybookComment[] = rows.map((row) => {
         const commentUserId = String(row.user_id ?? "").trim();
         const userRow = byUserId[commentUserId];
-        const username = userRow?.name || userRow?.email || "Trader";
+        const username = userRow?.name || userRow?.email || "Unknown";
         return {
           id: String(row.id ?? ""),
           user_id: commentUserId,
@@ -397,6 +560,7 @@ export default function PlaybookPreviewView({
           created_at: String(row.created_at ?? ""),
           username,
           userInitial: username.charAt(0).toUpperCase() || "T",
+          avatarUrl: userRow?.avatarUrl ?? "",
           isAuthor: commentUserId.length > 0 && commentUserId === authorUserId,
           replies: [],
         };
@@ -416,7 +580,10 @@ export default function PlaybookPreviewView({
       const orderedTopLevel = topLevel.sort(
         (a, b) => new Date(String(b.created_at ?? "")).getTime() - new Date(String(a.created_at ?? "")).getTime()
       );
-      if (!cancelled) setComments(orderedTopLevel);
+      if (!cancelled) {
+        setComments(orderedTopLevel);
+        setCommentsLoading(false);
+      }
     }
     void loadComments();
     return () => {
@@ -426,8 +593,8 @@ export default function PlaybookPreviewView({
 
   const ctaLabel = useMemo(() => {
     if (ownedCopyFolderId) return "Open Playbook";
-    if (resolvedPlaybook?.is_paid) return `Buy & Import (€${Number(resolvedPlaybook.price ?? 0).toFixed(0)})`;
-    return "Import";
+    if (resolvedPlaybook?.is_paid) return `Unlock Playbook - €${Number(resolvedPlaybook.price ?? 29).toFixed(0)}`;
+    return "Import Playbook";
   }, [ownedCopyFolderId, resolvedPlaybook?.is_paid, resolvedPlaybook?.price]);
 
   function handleCta() {
@@ -457,6 +624,8 @@ export default function PlaybookPreviewView({
     setLikePending(true);
     setLiked(nextLiked);
     setLikesCount(nextCount);
+    setLikeBouncing(true);
+    window.setTimeout(() => setLikeBouncing(false), 220);
 
     try {
       if (wasLiked) {
@@ -478,6 +647,41 @@ export default function PlaybookPreviewView({
       setLikesCount(previousCount);
     } finally {
       setLikePending(false);
+    }
+  }
+
+  async function toggleFollow() {
+    if (!authorUserId || followPending) return;
+    const { data: auth } = await supabase.auth.getUser();
+    const followerId = String(auth.user?.id ?? "").trim();
+    if (!followerId) {
+      router.push(`/login?next=${encodeURIComponent(`/playbook/${shareId}`)}`);
+      return;
+    }
+    if (followerId === authorUserId) return;
+
+    const wasFollowing = isFollowingAuthor;
+    setFollowPending(true);
+    setIsFollowingAuthor(!wasFollowing);
+    try {
+      if (wasFollowing) {
+        const { error } = await supabase
+          .from("follows")
+          .delete()
+          .eq("follower_id", followerId)
+          .eq("following_id", authorUserId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("follows").insert({
+          follower_id: followerId,
+          following_id: authorUserId,
+        });
+        if (error) throw error;
+      }
+    } catch {
+      setIsFollowingAuthor(wasFollowing);
+    } finally {
+      setFollowPending(false);
     }
   }
 
@@ -506,9 +710,16 @@ export default function PlaybookPreviewView({
         .single();
       if (insert.error || !insert.data) return;
 
-      const userQuery = await supabase.from("users").select("name, email").eq("id", userId).limit(1);
-      const userRow = (userQuery.data?.[0] ?? {}) as { name?: string | null; email?: string | null };
-      const username = String(userRow.name ?? "").trim() || String(userRow.email ?? "").trim() || "Trader";
+      const userQuery = await supabase
+        .from("profiles")
+        .select("username, avatar_url")
+        .eq("id", userId)
+        .limit(1);
+      const userRow = (userQuery.data?.[0] ?? {}) as {
+        username?: string | null;
+        avatar_url?: string | null;
+      };
+      const username = String(userRow.username ?? "").trim() || "Unknown";
 
       const newItem: PlaybookComment = {
         id: String(insert.data.id),
@@ -518,6 +729,7 @@ export default function PlaybookPreviewView({
         created_at: String(insert.data.created_at ?? ""),
         username,
         userInitial: username.charAt(0).toUpperCase() || "T",
+        avatarUrl: String(userRow.avatar_url ?? "").trim(),
         isAuthor: userId === authorUserId,
         replies: [],
       };
@@ -532,6 +744,7 @@ export default function PlaybookPreviewView({
       }
 
       setComments((prev) => [newItem, ...prev]);
+      setNewestCommentId(newItem.id);
       setNewComment("");
     } finally {
       setPostingComment(false);
@@ -565,9 +778,16 @@ export default function PlaybookPreviewView({
         .single();
       if (insert.error || !insert.data) return;
 
-      const userQuery = await supabase.from("users").select("name, email").eq("id", userId).limit(1);
-      const userRow = (userQuery.data?.[0] ?? {}) as { name?: string | null; email?: string | null };
-      const username = String(userRow.name ?? "").trim() || String(userRow.email ?? "").trim() || "Trader";
+      const userQuery = await supabase
+        .from("profiles")
+        .select("username, avatar_url")
+        .eq("id", userId)
+        .limit(1);
+      const userRow = (userQuery.data?.[0] ?? {}) as {
+        username?: string | null;
+        avatar_url?: string | null;
+      };
+      const username = String(userRow.username ?? "").trim() || "Unknown";
 
       const newReply: PlaybookComment = {
         id: String(insert.data.id),
@@ -577,6 +797,7 @@ export default function PlaybookPreviewView({
         created_at: String(insert.data.created_at ?? ""),
         username,
         userInitial: username.charAt(0).toUpperCase() || "T",
+        avatarUrl: String(userRow.avatar_url ?? "").trim(),
         isAuthor: userId === authorUserId,
         replies: [],
       };
@@ -619,7 +840,8 @@ export default function PlaybookPreviewView({
     Boolean(resolvedPlaybook?.has_annotations) ||
     Boolean(resolvedPlaybook?.has_voice) ||
     Boolean(resolvedPlaybook?.has_notes);
-  const ctaClassName = "micro-btn rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-150";
+  const ctaClassName =
+    "micro-btn rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90";
   const previewItems = previewScreenshots.slice(0, 6);
   const visibleComments = commentsExpanded ? comments : comments.slice(0, 3);
   const totalCount = previewItems.length;
@@ -662,10 +884,13 @@ export default function PlaybookPreviewView({
 
       <div className="relative h-[260px] w-full overflow-hidden rounded-xl">
         {coverUrl ? (
-          <img
+          <Image
             src={coverUrl}
             alt={`${playbook?.name ?? "Playbook"} cover`}
-            className="h-full w-full object-cover"
+            fill
+            priority
+            sizes="(min-width: 1024px) 960px, 100vw"
+            className="object-cover"
             draggable={false}
           />
         ) : (
@@ -676,7 +901,30 @@ export default function PlaybookPreviewView({
 
         <div className="absolute bottom-4 left-4 text-white">
           <h1 className="text-2xl font-semibold text-gray-100">{playbook?.name ?? "Playbook Preview"}</h1>
-          <p className="text-sm text-gray-300">{authorName}</p>
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenAuthorProfile}
+              disabled={!authorUsername || !onOpenAuthorProfile}
+              className="cursor-pointer text-sm text-gray-300 transition-colors hover:underline disabled:cursor-default disabled:no-underline"
+            >
+              {authorName}
+            </button>
+            {authorUserId ? (
+              <button
+                type="button"
+                onClick={() => void toggleFollow()}
+                disabled={followPending}
+                className={`rounded-md border px-3 py-1.5 text-sm transition-all duration-150 ease-in-out disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isFollowingAuthor
+                    ? "border-black bg-black text-white hover:opacity-90"
+                    : "border-gray-300 bg-white text-gray-900 hover:bg-gray-100"
+                }`}
+              >
+                {isFollowingAuthor ? "Following" : "Follow"}
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="absolute right-4 top-4">
@@ -700,6 +948,20 @@ export default function PlaybookPreviewView({
               {previewScreenshots.length} screenshots
               {updatedText ? ` • ${updatedText}` : ""}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+              <span className="inline-flex items-center gap-1">
+                <Heart size={14} className={liked ? "fill-red-500 text-red-500" : "text-gray-500"} />
+                {likesCount}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <MessageCircle size={14} className="text-gray-500" />
+                {comments.length}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Download size={14} className="text-gray-500" />
+                {importsCount}
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => void toggleLike()}
@@ -710,7 +972,7 @@ export default function PlaybookPreviewView({
             >
               <Heart
                 size={18}
-                className={`${likePending ? "animate-pulse" : ""} ${
+                className={`transition-transform duration-200 ${likeBouncing ? "scale-110" : "scale-100"} ${likePending ? "animate-pulse" : ""} ${
                   liked ? "fill-red-500 text-red-500" : "text-gray-400"
                 }`}
               />
@@ -777,9 +1039,12 @@ export default function PlaybookPreviewView({
                 isBlurred ? "cursor-default" : "cursor-pointer"
               }`}
             >
-              <img
+              <Image
                 src={item.image_url}
                 alt=""
+                width={800}
+                height={480}
+                loading="lazy"
                 className={`h-40 w-full rounded-lg object-cover transition-all duration-150 md:h-48 ${
                   isBlurred ? "blur-sm" : ""
                 }`}
@@ -800,26 +1065,48 @@ export default function PlaybookPreviewView({
       </div>
 
       <div className="flex items-center gap-3 border-t pt-4">
-        {authorAvatarUrl ? (
-          <img
-            src={authorAvatarUrl}
-            alt={`${authorName} avatar`}
-            className="h-10 w-10 rounded-full object-cover transition-transform duration-200 hover:scale-105"
-            draggable={false}
-          />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-sm font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100">
-            {authorName.charAt(0).toUpperCase()}
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={handleOpenAuthorProfile}
+          disabled={!authorUsername || !onOpenAuthorProfile}
+          className="flex cursor-pointer items-center gap-3 disabled:cursor-default"
+        >
+          {authorAvatarUrl ? (
+            <Image
+              src={authorAvatarUrl}
+              alt={`${authorName} avatar`}
+              width={32}
+              height={32}
+              loading="lazy"
+              className="h-8 w-8 rounded-full bg-gray-300 object-cover"
+              draggable={false}
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+              {authorName.charAt(0).toUpperCase()}
+            </div>
+          )}
 
-        <div>
-          <p className="text-sm text-gray-700 dark:text-gray-300">{authorName}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Creator</p>
-        </div>
+          <div className="text-left">
+            <p className="text-sm text-gray-700 transition-colors hover:underline dark:text-gray-300">{authorName}</p>
+            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Creator</p>
+          </div>
+        </button>
+        {authorUsername ? (
+          <button
+            type="button"
+            onClick={handleOpenAuthorProfile}
+            className="ml-auto text-xs font-medium text-gray-600 underline underline-offset-4 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+          >
+            View profile
+          </button>
+        ) : null}
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex flex-col items-center justify-center text-center">
+        <p className="mb-2 text-sm text-gray-700 dark:text-gray-300">
+          Full access to all screenshots, notes & annotations
+        </p>
         <button
           type="button"
           onClick={handleCta}
@@ -827,16 +1114,108 @@ export default function PlaybookPreviewView({
         >
           {ctaLabel}
         </button>
+        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          {resolvedPlaybook?.is_paid ? "Instant access after purchase" : "Instant access after import"}
+        </p>
       </div>
+
+      {moreFromAuthor.length > 0 ? (
+        <div className="mt-8">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">More from this author</h3>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {moreFromAuthor.map((item) => {
+              const primaryAsset =
+                Array.isArray(item.asset_types) && item.asset_types.length > 0
+                  ? item.asset_types[0]
+                  : "General";
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => router.push(`/playbook/${encodeURIComponent(item.share_id)}`)}
+                  className="group overflow-hidden rounded-2xl border border-gray-200 bg-white text-left shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <div className="relative h-32 w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+                    {item.displayCover ? (
+                      <Image
+                        src={item.displayCover}
+                        alt={`${item.name} cover`}
+                        fill
+                        sizes="(min-width: 1024px) 240px, (min-width: 640px) 50vw, 100vw"
+                        loading="lazy"
+                        className="object-cover transition-transform duration-200 group-hover:scale-105"
+                        draggable={false}
+                      />
+                    ) : null}
+                    <span className="absolute right-2 top-2 rounded-full bg-black/75 px-2 py-0.5 text-[11px] font-medium text-white">
+                      {item.is_paid ? `€${Number(item.price ?? 0).toFixed(0)}` : "Free"}
+                    </span>
+                  </div>
+                  <div className="space-y-1 p-3">
+                    <p className="line-clamp-1 text-sm font-medium text-gray-900 dark:text-gray-100">{item.name}</p>
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {item.screenshotCount} screenshots • {primaryAsset}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-8">
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Comments ({comments.length})</h3>
 
-        {visibleComments.map((comment) => (
-          <div key={comment.id} className="mt-4 flex gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-300 text-sm text-gray-700">
-              {comment.userInitial}
+        {commentsLoading ? (
+          <p className="mt-3 text-sm text-gray-700 dark:text-gray-300">Loading comments...</p>
+        ) : comments.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+            <div className="flex flex-col items-center justify-center text-center">
+              <MessageCircle size={24} className="text-gray-500 dark:text-gray-400" aria-hidden />
+              <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">No comments yet</p>
+              <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                Be the first to share your thoughts
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  const textarea = document.querySelector<HTMLTextAreaElement>(
+                    'textarea[placeholder="Write a comment..."]'
+                  );
+                  textarea?.focus();
+                }}
+                className="mt-4 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90"
+              >
+                Write a comment
+              </button>
             </div>
+          </div>
+        ) : null}
+
+        {visibleComments.map((comment) => (
+          <motion.div
+            key={comment.id}
+            className="mt-4 flex gap-3"
+            initial={comment.id === newestCommentId ? { opacity: 0, y: 8 } : false}
+            animate={comment.id === newestCommentId ? { opacity: 1, y: 0 } : undefined}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+          >
+            {comment.avatarUrl ? (
+              <Image
+                src={comment.avatarUrl}
+                alt={`${comment.username} avatar`}
+                width={32}
+                height={32}
+                loading="lazy"
+                className="h-8 w-8 rounded-full bg-gray-300 object-cover"
+                draggable={false}
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+                {comment.username.charAt(0).toUpperCase()}
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{comment.username}</span>
@@ -861,14 +1240,14 @@ export default function PlaybookPreviewView({
                     value={replyDraft}
                     onChange={(event) => setReplyDraft(event.target.value)}
                     placeholder="Write a reply..."
-                    className="w-full rounded border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    className="w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                     rows={2}
                   />
                   <button
                     type="button"
                     onClick={() => void handlePostReply(comment.id)}
                     disabled={postingReplyParentId === comment.id || replyDraft.trim().length === 0}
-                    className="mt-2 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                    className="mt-2 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {postingReplyParentId === comment.id ? "Posting..." : "Post reply"}
                   </button>
@@ -879,9 +1258,21 @@ export default function PlaybookPreviewView({
                 <div className="ml-10 mt-2 space-y-2">
                   {comment.replies.map((reply) => (
                     <div key={reply.id} className="flex gap-2">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-xs text-gray-600">
-                        {reply.userInitial}
-                      </div>
+                      {reply.avatarUrl ? (
+                        <Image
+                          src={reply.avatarUrl}
+                          alt={`${reply.username} avatar`}
+                          width={32}
+                          height={32}
+                          loading="lazy"
+                          className="h-8 w-8 rounded-full bg-gray-300 object-cover"
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+                          {reply.username.charAt(0).toUpperCase()}
+                        </div>
+                      )}
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -898,7 +1289,7 @@ export default function PlaybookPreviewView({
                 </div>
               ) : null}
             </div>
-          </div>
+          </motion.div>
         ))}
 
         {comments.length > 3 ? (
@@ -915,14 +1306,14 @@ export default function PlaybookPreviewView({
           value={newComment}
           onChange={(event) => setNewComment(event.target.value)}
           placeholder="Write a comment..."
-          className="mt-4 w-full rounded border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          className="mt-4 w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           rows={3}
         />
         <button
           type="button"
           onClick={() => void handlePostComment()}
           disabled={postingComment || newComment.trim().length === 0}
-          className="mt-2 rounded bg-black px-3 py-1.5 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-2 rounded-md bg-black px-3 py-1.5 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {postingComment ? "Posting..." : "Post"}
         </button>

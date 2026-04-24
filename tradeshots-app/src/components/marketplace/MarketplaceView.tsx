@@ -5,7 +5,7 @@
  * Lists public playbooks, search, filters, sort.
  */
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import { Mic, Pencil, Search } from "lucide-react";
+import { Flame, Mic, Pencil, Search } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import SkeletonCard from "@/components/marketplace/SkeletonCard";
 
@@ -17,6 +17,7 @@ type MarketplaceFolder = {
   price?: number | null;
   share_id?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
   asset_types?: string[] | null;
   timeframe?: string | null;
   strategy_types?: string[] | null;
@@ -28,23 +29,32 @@ type MarketplaceFolder = {
 };
 
 type PriceFilter = "all" | "free" | "paid";
-type SortMode = "newest" | "price-asc" | "price-desc";
+type SortMode = "new" | "popular" | "most-imported" | "recently-updated";
 
 export type MarketplacePlaybook = MarketplaceFolder;
+export type MarketplaceAuthorProfile = {
+  userId: string;
+  username: string;
+  avatarUrl: string;
+};
 
 export default function MarketplaceView({
   onOpenPlaybook,
+  onOpenAuthorProfile,
 }: {
   onOpenPlaybook?: (playbook: MarketplacePlaybook) => void;
+  onOpenAuthorProfile?: (author: MarketplaceAuthorProfile) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("all");
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [sortMode, setSortMode] = useState<SortMode>("new");
   const [playbooks, setPlaybooks] = useState<MarketplaceFolder[]>([]);
   const [fallbackCovers, setFallbackCovers] = useState<Record<string, string>>({});
   const [screenshotCounts, setScreenshotCounts] = useState<Record<string, number>>({});
+  const [likesCounts, setLikesCounts] = useState<Record<string, number>>({});
+  const [importsCounts, setImportsCounts] = useState<Record<string, number>>({});
   const [creatorByFolder, setCreatorByFolder] = useState<
     Record<string, { name: string; avatarUrl: string }>
   >({});
@@ -54,7 +64,7 @@ export default function MarketplaceView({
   const [selectedExperienceLevel, setSelectedExperienceLevel] = useState<string>("");
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
 
-  const assetTypeOptions = ["Stocks", "Futures", "Forex", "Crypto", "Options"];
+  const assetTypeOptions = ["Stocks", "Forex", "Crypto", "Options"];
   const timeframeOptions = ["Scalping", "Intraday", "Swing", "Position"];
   const strategyTypeOptions = ["Breakout", "Reversal", "Trend", "Range", "Momentum"];
   const experienceLevelOptions = ["Beginner", "Intermediate", "Advanced"];
@@ -69,7 +79,7 @@ export default function MarketplaceView({
       let folderQuery = await supabase
         .from("folders")
         .select(
-          "id, name, cover_url, is_paid, price, share_id, is_public, created_at, user_id, asset_types, timeframe, strategy_types, experience_level, has_annotations, has_notes, has_voice"
+          "id, name, cover_url, is_paid, price, share_id, is_public, created_at, updated_at, user_id, asset_types, timeframe, strategy_types, experience_level, has_annotations, has_notes, has_voice"
         )
         .eq("is_public", true)
         .not("share_id", "is", null)
@@ -132,26 +142,53 @@ export default function MarketplaceView({
             setScreenshotCounts(countByFolder);
           }
         }
+
+        const likesQuery = await supabase
+          .from("playbook_likes")
+          .select("playbook_id")
+          .in("playbook_id", folderIds);
+        if (!likesQuery.error) {
+          const likesByFolder: Record<string, number> = {};
+          for (const row of (likesQuery.data ?? []) as Array<{ playbook_id: string | null }>) {
+            const fid = String(row.playbook_id ?? "").trim();
+            if (!fid) continue;
+            likesByFolder[fid] = (likesByFolder[fid] ?? 0) + 1;
+          }
+          if (!cancelled) setLikesCounts(likesByFolder);
+        }
+
+        const importsQuery = await supabase
+          .from("user_playbooks")
+          .select("source_folder_id")
+          .in("source_folder_id", folderIds);
+        if (!importsQuery.error) {
+          const importsByFolder: Record<string, number> = {};
+          for (const row of (importsQuery.data ?? []) as Array<{ source_folder_id: string | null }>) {
+            const fid = String(row.source_folder_id ?? "").trim();
+            if (!fid) continue;
+            importsByFolder[fid] = (importsByFolder[fid] ?? 0) + 1;
+          }
+          if (!cancelled) setImportsCounts(importsByFolder);
+        }
       }
 
       if (creatorIds.length > 0) {
         const creatorsQuery = await supabase
-          .from("users")
-          .select("id, name, avatar_url, email")
+          .from("profiles")
+          .select("id, username, avatar_url")
           .in("id", creatorIds);
 
         if (!creatorsQuery.error) {
           const byId: Record<string, { name: string; avatarUrl: string }> = {};
           for (const row of (creatorsQuery.data ?? []) as Array<{
             id: string;
-            name?: string | null;
+            username?: string | null;
             avatar_url?: string | null;
-            email?: string | null;
           }>) {
             const id = String(row.id ?? "").trim();
             if (!id) continue;
             byId[id] = {
-              name: String(row.name ?? "").trim() || String(row.email ?? "").trim() || "Trader",
+              name: String(row.username ?? "").trim() || "Unknown",
               avatarUrl: String(row.avatar_url ?? "").trim(),
             };
           }
@@ -210,14 +247,30 @@ export default function MarketplaceView({
     });
 
     rows.sort((a, b) => {
-      if (sortMode === "newest") {
+      if (sortMode === "new") {
         const da = new Date(a.created_at ?? 0).getTime();
         const db = new Date(b.created_at ?? 0).getTime();
         return db - da;
       }
-      const pa = Number(a.price ?? 0);
-      const pb = Number(b.price ?? 0);
-      return sortMode === "price-asc" ? pa - pb : pb - pa;
+      if (sortMode === "popular") {
+        const la = likesCounts[String(a.id)] ?? 0;
+        const lb = likesCounts[String(b.id)] ?? 0;
+        if (lb !== la) return lb - la;
+        const da = new Date(a.created_at ?? 0).getTime();
+        const db = new Date(b.created_at ?? 0).getTime();
+        return db - da;
+      }
+      if (sortMode === "most-imported") {
+        const ia = importsCounts[String(a.id)] ?? 0;
+        const ib = importsCounts[String(b.id)] ?? 0;
+        if (ib !== ia) return ib - ia;
+        const da = new Date(a.created_at ?? 0).getTime();
+        const db = new Date(b.created_at ?? 0).getTime();
+        return db - da;
+      }
+      const ua = new Date(a.updated_at ?? a.created_at ?? 0).getTime();
+      const ub = new Date(b.updated_at ?? b.created_at ?? 0).getTime();
+      return ub - ua;
     });
 
     return rows;
@@ -231,7 +284,39 @@ export default function MarketplaceView({
     selectedStrategyTypes,
     selectedExperienceLevel,
     selectedFeatures,
+    likesCounts,
+    importsCounts,
   ]);
+
+  const trendingPlaybooks = useMemo(() => {
+    function recentActivityScore(updatedAt?: string | null, createdAt?: string | null) {
+      const ts = new Date(updatedAt ?? createdAt ?? 0).getTime();
+      if (!Number.isFinite(ts) || ts <= 0) return 0;
+      const ageDays = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+      if (ageDays <= 1) return 5;
+      if (ageDays <= 7) return 3;
+      if (ageDays <= 30) return 1;
+      return 0;
+    }
+
+    return [...playbooks]
+      .map((p) => {
+        const likes = likesCounts[String(p.id)] ?? 0;
+        const imports = importsCounts[String(p.id)] ?? 0;
+        const recent = recentActivityScore(p.updated_at, p.created_at);
+        const trendingScore = likes + imports + recent;
+        const ts = new Date(p.updated_at ?? p.created_at ?? 0).getTime();
+        const isHot = Number.isFinite(ts) && ts > 0 && Date.now() - ts <= 1000 * 60 * 60 * 24;
+        return { playbook: p, likes, imports, recent, trendingScore, isHot };
+      })
+      .sort((a, b) => {
+        if (b.trendingScore !== a.trendingScore) return b.trendingScore - a.trendingScore;
+        const au = new Date(a.playbook.updated_at ?? a.playbook.created_at ?? 0).getTime();
+        const bu = new Date(b.playbook.updated_at ?? b.playbook.created_at ?? 0).getTime();
+        return bu - au;
+      })
+      .slice(0, 5);
+  }, [playbooks, likesCounts, importsCounts]);
 
   function toggleValue(setter: Dispatch<SetStateAction<string[]>>, value: string) {
     setter((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
@@ -239,11 +324,51 @@ export default function MarketplaceView({
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Marketplace</h1>
-        <p className="text-sm text-gray-700 dark:text-gray-300">
-        Discover public playbooks and import the ones you like.
-        </p>
+        <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as SortMode)}
+          className="micro-btn rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+        >
+          <option value="new">New</option>
+          <option value="popular">Popular</option>
+          <option value="most-imported">Most imported</option>
+          <option value="recently-updated">Recently updated</option>
+        </select>
+      </div>
+
+      <p className="text-sm text-gray-700 dark:text-gray-300">Discover playbooks from other traders</p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setSelectedAssetTypes([])}
+          className={`micro-pill rounded-full px-3 py-1 text-sm font-medium ${
+            selectedAssetTypes.length === 0
+              ? "bg-black text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          }`}
+        >
+          All
+        </button>
+        {assetTypeOptions.map((opt) => {
+          const selected = selectedAssetTypes.includes(opt);
+          return (
+            <button
+              key={`header-asset-${opt}`}
+              type="button"
+              onClick={() => toggleValue(setSelectedAssetTypes, opt)}
+              className={`micro-pill rounded-full px-3 py-1 text-sm font-medium ${
+                selected
+                  ? "bg-black text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              }`}
+            >
+              {opt}
+            </button>
+          );
+        })}
       </div>
 
       <div>
@@ -406,15 +531,6 @@ export default function MarketplaceView({
           </div>
         </details>
 
-        <select
-          value={sortMode}
-          onChange={(e) => setSortMode(e.target.value as SortMode)}
-          className="micro-btn ml-auto rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-        >
-          <option value="newest">Newest</option>
-          <option value="price-asc">Price: Low to High</option>
-          <option value="price-desc">Price: High to Low</option>
-        </select>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -471,6 +587,67 @@ export default function MarketplaceView({
       </div>
       </div>
 
+      {!loading && trendingPlaybooks.length > 0 ? (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">🔥 Trending Playbooks</h2>
+            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Likes + Imports + Recent Activity
+            </p>
+          </div>
+          <div className="flex gap-4 overflow-x-auto pb-2">
+            {trendingPlaybooks.map(({ playbook, likes, imports, trendingScore, isHot }) => {
+              const cover = playbook.cover_url || fallbackCovers[String(playbook.id)] || "";
+              const creator = creatorByFolder[String(playbook.id)] ?? { name: "Unknown", avatarUrl: "" };
+              return (
+                <button
+                  key={`trending-${playbook.id}`}
+                  type="button"
+                  onClick={() => onOpenPlaybook?.(playbook)}
+                  className="group min-w-[300px] max-w-[300px] overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <div className="relative h-40 w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+                    {cover ? (
+                      <img
+                        src={cover}
+                        alt={`${playbook.name} cover`}
+                        className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                        draggable={false}
+                      />
+                    ) : null}
+                    <span className="absolute right-2 top-2 rounded-full bg-black/75 px-2 py-0.5 text-[11px] font-medium text-white">
+                      Score {trendingScore}
+                    </span>
+                  </div>
+                  <div className="space-y-1 p-3">
+                    <div className="flex items-center gap-1.5">
+                      <p className="line-clamp-1 text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {playbook.name || "Playbook"}
+                      </p>
+                      {isHot ? (
+                        <span
+                          className="inline-flex items-center text-orange-500"
+                          title="Hot: active in last 24h"
+                          aria-label="Hot playbook"
+                        >
+                          <Flame size={14} />
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="line-clamp-1 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {creator.name}
+                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                      {likes} likes • {imports} imports
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       {loading ? (
         <div className="grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 10 }, (_, i) => (
@@ -484,7 +661,7 @@ export default function MarketplaceView({
       ) : filtered.length === 0 ? (
         <div className="space-y-2 rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-10 text-center dark:border-gray-700 dark:bg-gray-900">
           <p className="text-sm text-gray-700 dark:text-gray-300">
-            No results found — adjust filters
+            No playbooks match your filters
           </p>
           <p className="text-sm text-gray-700 dark:text-gray-300">
             Adjust filters and search to discover more playbooks.
@@ -494,7 +671,7 @@ export default function MarketplaceView({
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((folder) => {
             const cover = folder.cover_url || fallbackCovers[String(folder.id)] || "";
-            const creator = creatorByFolder[String(folder.id)] ?? { name: "Trader", avatarUrl: "" };
+            const creator = creatorByFolder[String(folder.id)] ?? { name: "Unknown", avatarUrl: "" };
             const screenshotCount = screenshotCounts[String(folder.id)] ?? 0;
             const primaryAsset = Array.isArray(folder.asset_types) && folder.asset_types.length > 0
               ? folder.asset_types[0]
@@ -529,6 +706,39 @@ export default function MarketplaceView({
                     {folder.name || "Playbook"}
                   </p>
 
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const userId = String(folder.user_id ?? "").trim();
+                        if (!userId || !onOpenAuthorProfile) return;
+                        onOpenAuthorProfile({
+                          userId,
+                          username: creator.name,
+                          avatarUrl: creator.avatarUrl,
+                        });
+                      }}
+                      className="flex cursor-pointer items-center gap-2"
+                    >
+                      {creator.avatarUrl ? (
+                        <img
+                          src={creator.avatarUrl}
+                          alt={`${creator.name} avatar`}
+                          className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium"
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+                          {creator.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <p className="truncate text-xs uppercase tracking-wide text-gray-500 transition-colors hover:underline dark:text-gray-400">
+                        {creator.name}
+                      </p>
+                    </button>
+                  </div>
+
                   <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
                     {screenshotCount} screenshots • {primaryAsset}
                   </p>
@@ -538,9 +748,6 @@ export default function MarketplaceView({
                     {folder.has_voice ? <span title="Voice">🎤</span> : null}
                   </div>
 
-                  <p className="truncate text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                    by {creator.name}
-                  </p>
                 </div>
               </button>
             );

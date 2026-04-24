@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import { FileText, Heart, Image as ImageIcon, Mic, Pencil } from "lucide-react";
+import { Download, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import ScreenshotModal from "@/components/ScreenshotModal";
 
@@ -34,6 +36,7 @@ type PlaybookComment = {
   created_at?: string;
   username: string;
   userInitial: string;
+  avatarUrl: string;
   isAuthor: boolean;
   replies: PlaybookComment[];
 };
@@ -115,12 +118,17 @@ export default function SharedPlaybookView({
   const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [toastExiting, setToastExiting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [authorName, setAuthorName] = useState("Trader");
+  const [authorName, setAuthorName] = useState("Unknown");
+  const [authorUsername, setAuthorUsername] = useState("");
   const [authorAvatarUrl, setAuthorAvatarUrl] = useState("");
   const [likesCount, setLikesCount] = useState(0);
+  const [importsCount, setImportsCount] = useState(0);
   const [liked, setLiked] = useState(false);
   const [likePending, setLikePending] = useState(false);
+  const [likeBouncing, setLikeBouncing] = useState(false);
   const [comments, setComments] = useState<PlaybookComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newestCommentId, setNewestCommentId] = useState<string | null>(null);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [postingComment, setPostingComment] = useState(false);
@@ -152,6 +160,12 @@ export default function SharedPlaybookView({
   function redirectToLoginForThisPlaybook() {
     const nextPath = loginNextPath ?? (shareId ? `/playbook/${shareId}` : "/dashboard");
     router.push(`/login?next=${encodeURIComponent(nextPath)}`);
+  }
+
+  function openAuthorProfile() {
+    const username = authorUsername.trim();
+    if (!username) return;
+    router.push(`/profile/${encodeURIComponent(username)}`);
   }
 
   async function createCheckoutSession(
@@ -262,9 +276,13 @@ export default function SharedPlaybookView({
   useEffect(() => {
     let cancelled = false;
     async function loadComments() {
+      setCommentsLoading(true);
       const currentPlaybookId = String(folder?.id ?? "").trim();
       if (!currentPlaybookId) {
-        if (!cancelled) setComments([]);
+        if (!cancelled) {
+          setComments([]);
+          setCommentsLoading(false);
+        }
         return;
       }
 
@@ -272,11 +290,15 @@ export default function SharedPlaybookView({
         .from("playbook_comments")
         .select("id, user_id, parent_id, content, created_at")
         .eq("playbook_id", currentPlaybookId)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .limit(60);
 
       const rows = (commentsQuery.data ?? []) as Array<Record<string, unknown>>;
       if (commentsQuery.error || rows.length === 0) {
-        if (!cancelled) setComments([]);
+        if (!cancelled) {
+          setComments([]);
+          setCommentsLoading(false);
+        }
         return;
       }
 
@@ -284,16 +306,20 @@ export default function SharedPlaybookView({
         new Set(rows.map((row) => String(row.user_id ?? "").trim()).filter((value) => value.length > 0))
       );
 
-      let byUserId: Record<string, { name: string; email: string }> = {};
+      let byUserId: Record<string, { name: string; email: string; avatarUrl: string }> = {};
       if (userIds.length > 0) {
-        const usersQuery = await supabase.from("users").select("id, name, email").in("id", userIds);
+        const usersQuery = await supabase
+          .from("profiles")
+          .select("id, username, avatar_url")
+          .in("id", userIds);
         if (!usersQuery.error) {
           byUserId = Object.fromEntries(
             (usersQuery.data ?? []).map((row: Record<string, unknown>) => [
               String(row.id ?? ""),
               {
-                name: String(row.name ?? "").trim(),
-                email: String(row.email ?? "").trim(),
+                name: String(row.username ?? "").trim(),
+                email: "",
+                avatarUrl: String(row.avatar_url ?? "").trim(),
               },
             ])
           );
@@ -304,7 +330,7 @@ export default function SharedPlaybookView({
       const normalizedRows: PlaybookComment[] = rows.map((row) => {
         const commentUserId = String(row.user_id ?? "").trim();
         const userRow = byUserId[commentUserId];
-        const username = userRow?.name || userRow?.email || "Trader";
+        const username = userRow?.name || userRow?.email || "Unknown";
         return {
           id: String(row.id ?? ""),
           user_id: commentUserId,
@@ -313,6 +339,7 @@ export default function SharedPlaybookView({
           created_at: String(row.created_at ?? ""),
           username,
           userInitial: username.charAt(0).toUpperCase() || "T",
+          avatarUrl: userRow?.avatarUrl ?? "",
           isAuthor: commentUserId.length > 0 && commentUserId === ownerUserId,
           replies: [],
         };
@@ -332,7 +359,10 @@ export default function SharedPlaybookView({
       const orderedTopLevel = topLevel.sort(
         (a, b) => new Date(String(b.created_at ?? "")).getTime() - new Date(String(a.created_at ?? "")).getTime()
       );
-      if (!cancelled) setComments(orderedTopLevel);
+      if (!cancelled) {
+        setComments(orderedTopLevel);
+        setCommentsLoading(false);
+      }
     }
     void loadComments();
     return () => {
@@ -346,32 +376,34 @@ export default function SharedPlaybookView({
       const ownerUserId = String(folder?.user_id ?? "").trim();
       if (!ownerUserId) {
         if (!cancelled) {
-          setAuthorName("Trader");
+          setAuthorUsername("");
+          setAuthorName("Unknown");
           setAuthorAvatarUrl("");
         }
         return;
       }
 
       const authorQuery = await supabase
-        .from("users")
-        .select("name, avatar_url, email")
+        .from("profiles")
+        .select("username, avatar_url")
         .eq("id", ownerUserId)
         .limit(1);
 
       if (!cancelled && !authorQuery.error && authorQuery.data?.[0]) {
         const row = authorQuery.data[0] as {
-          name?: string | null;
+          username?: string | null;
           avatar_url?: string | null;
-          email?: string | null;
         };
-        const fallbackName = String(row.email ?? "").trim() || "Trader";
-        setAuthorName(String(row.name ?? "").trim() || fallbackName);
+        const username = String(row.username ?? "").trim();
+        setAuthorUsername(username);
+        setAuthorName(username || "Unknown");
         setAuthorAvatarUrl(String(row.avatar_url ?? "").trim());
         return;
       }
 
       if (!cancelled) {
-        setAuthorName("Trader");
+        setAuthorUsername("");
+        setAuthorName("Unknown");
         setAuthorAvatarUrl("");
       }
     }
@@ -388,21 +420,27 @@ export default function SharedPlaybookView({
       if (!currentPlaybookId) {
         if (!cancelled) {
           setLikesCount(0);
+          setImportsCount(0);
           setLiked(false);
         }
         return;
       }
 
-      const [{ count }, authRes] = await Promise.all([
+      const [{ count }, { count: importCount }, authRes] = await Promise.all([
         supabase
           .from("playbook_likes")
           .select("*", { count: "exact", head: true })
           .eq("playbook_id", currentPlaybookId),
+        supabase
+          .from("user_playbooks")
+          .select("*", { count: "exact", head: true })
+          .eq("source_folder_id", currentPlaybookId),
         supabase.auth.getUser(),
       ]);
 
       if (cancelled) return;
       setLikesCount(typeof count === "number" ? count : 0);
+      setImportsCount(typeof importCount === "number" ? importCount : 0);
 
       const currentUserId = String(authRes.data.user?.id ?? "").trim();
       if (!currentUserId) {
@@ -452,6 +490,8 @@ export default function SharedPlaybookView({
     setLikePending(true);
     setLiked(nextLiked);
     setLikesCount(nextCount);
+    setLikeBouncing(true);
+    window.setTimeout(() => setLikeBouncing(false), 220);
 
     try {
       if (wasLiked) {
@@ -502,9 +542,16 @@ export default function SharedPlaybookView({
         .single();
       if (insert.error || !insert.data) return;
 
-      const userQuery = await supabase.from("users").select("name, email").eq("id", userId).limit(1);
-      const userRow = (userQuery.data?.[0] ?? {}) as { name?: string | null; email?: string | null };
-      const username = String(userRow.name ?? "").trim() || String(userRow.email ?? "").trim() || "Trader";
+      const userQuery = await supabase
+        .from("profiles")
+        .select("username, avatar_url")
+        .eq("id", userId)
+        .limit(1);
+      const userRow = (userQuery.data?.[0] ?? {}) as {
+        username?: string | null;
+        avatar_url?: string | null;
+      };
+      const username = String(userRow.username ?? "").trim() || "Unknown";
       const ownerUserId = String(folder?.user_id ?? "").trim();
 
       const newItem: PlaybookComment = {
@@ -515,6 +562,7 @@ export default function SharedPlaybookView({
         created_at: String(insert.data.created_at ?? ""),
         username,
         userInitial: username.charAt(0).toUpperCase() || "T",
+        avatarUrl: String(userRow.avatar_url ?? "").trim(),
         isAuthor: userId === ownerUserId,
         replies: [],
       };
@@ -529,6 +577,7 @@ export default function SharedPlaybookView({
       }
 
       setComments((prev) => [newItem, ...prev]);
+      setNewestCommentId(newItem.id);
       setNewComment("");
     } finally {
       setPostingComment(false);
@@ -563,9 +612,16 @@ export default function SharedPlaybookView({
         .single();
       if (insert.error || !insert.data) return;
 
-      const userQuery = await supabase.from("users").select("name, email").eq("id", userId).limit(1);
-      const userRow = (userQuery.data?.[0] ?? {}) as { name?: string | null; email?: string | null };
-      const username = String(userRow.name ?? "").trim() || String(userRow.email ?? "").trim() || "Trader";
+      const userQuery = await supabase
+        .from("profiles")
+        .select("username, avatar_url")
+        .eq("id", userId)
+        .limit(1);
+      const userRow = (userQuery.data?.[0] ?? {}) as {
+        username?: string | null;
+        avatar_url?: string | null;
+      };
+      const username = String(userRow.username ?? "").trim() || "Unknown";
       const ownerUserId = String(folder?.user_id ?? "").trim();
 
       const newReply: PlaybookComment = {
@@ -576,6 +632,7 @@ export default function SharedPlaybookView({
         created_at: String(insert.data.created_at ?? ""),
         username,
         userInitial: username.charAt(0).toUpperCase() || "T",
+        avatarUrl: String(userRow.avatar_url ?? "").trim(),
         isAuthor: userId === ownerUserId,
         replies: [],
       };
@@ -789,7 +846,7 @@ export default function SharedPlaybookView({
         console.warn("notifications insert:", notifErr.message);
       }
 
-      showToast(options?.successToast ?? "Playbook imported");
+      showToast(options?.successToast ?? "Playbook imported successfully");
       if (!options?.skipRedirect) router.push("/dashboard");
     } finally {
       setImporting(false);
@@ -1071,7 +1128,7 @@ export default function SharedPlaybookView({
             ? "Verifying payment..."
             : checkingOut
               ? "Redirecting..."
-              : `Buy & Import (€${folder.price ?? 19})`}
+              : `Unlock Playbook - €${folder.price ?? 29}`}
         </button>
       );
     }
@@ -1113,7 +1170,7 @@ export default function SharedPlaybookView({
             >
               <Heart
                 size={18}
-                className={`${likePending ? "animate-pulse" : ""} ${
+                className={`transition-transform duration-200 ${likeBouncing ? "scale-110" : "scale-100"} ${likePending ? "animate-pulse" : ""} ${
                   liked ? "fill-red-500 text-red-500" : "text-gray-400"
                 }`}
               />
@@ -1123,9 +1180,12 @@ export default function SharedPlaybookView({
 
           {coverImageUrl ? (
             <div className="group micro-card overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-              <img
+              <Image
                 src={coverImageUrl}
                 alt="Playbook cover"
+                width={1200}
+                height={360}
+                priority
                 className="h-56 w-full object-cover transition-transform duration-200 ease-out group-hover:scale-[1.02]"
                 draggable={false}
               />
@@ -1140,11 +1200,55 @@ export default function SharedPlaybookView({
           <div className="mt-8 text-left">
             <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Comments ({comments.length})</h3>
 
-            {visibleComments.map((comment) => (
-              <div key={comment.id} className="mt-4 flex gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-300 text-sm text-gray-700">
-                  {comment.userInitial}
+            {commentsLoading ? (
+              <p className="mt-3 text-sm text-gray-700 dark:text-gray-300">Loading comments...</p>
+            ) : comments.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <div className="flex flex-col items-center justify-center text-center">
+                  <MessageCircle size={24} className="text-gray-500 dark:text-gray-400" aria-hidden />
+                  <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">No comments yet</p>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                    Be the first to share your thoughts
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const textarea = document.querySelector<HTMLTextAreaElement>(
+                        'textarea[placeholder="Write a comment..."]'
+                      );
+                      textarea?.focus();
+                    }}
+                    className="mt-4 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90"
+                  >
+                    Write a comment
+                  </button>
                 </div>
+              </div>
+            ) : null}
+
+            {visibleComments.map((comment) => (
+              <motion.div
+                key={comment.id}
+                className="mt-4 flex gap-3"
+                initial={comment.id === newestCommentId ? { opacity: 0, y: 8 } : false}
+                animate={comment.id === newestCommentId ? { opacity: 1, y: 0 } : undefined}
+                transition={{ duration: 0.22, ease: "easeOut" }}
+              >
+                {comment.avatarUrl ? (
+                  <Image
+                    src={comment.avatarUrl}
+                    alt={`${comment.username} avatar`}
+                    width={32}
+                    height={32}
+                    loading="lazy"
+                    className="h-8 w-8 rounded-full bg-gray-300 object-cover"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+                    {comment.username.charAt(0).toUpperCase()}
+                  </div>
+                )}
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{comment.username}</span>
@@ -1168,14 +1272,14 @@ export default function SharedPlaybookView({
                         value={replyDraft}
                         onChange={(event) => setReplyDraft(event.target.value)}
                         placeholder="Write a reply..."
-                        className="w-full rounded border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                        className="w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                         rows={2}
                       />
                       <button
                         type="button"
                         onClick={() => void handlePostReply(comment.id)}
                         disabled={postingReplyParentId === comment.id || replyDraft.trim().length === 0}
-                        className="mt-2 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                        className="mt-2 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {postingReplyParentId === comment.id ? "Posting..." : "Post reply"}
                       </button>
@@ -1185,9 +1289,21 @@ export default function SharedPlaybookView({
                     <div className="ml-10 mt-2 space-y-2">
                       {comment.replies.map((reply) => (
                         <div key={reply.id} className="flex gap-2">
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-xs text-gray-600">
-                            {reply.userInitial}
-                          </div>
+                          {reply.avatarUrl ? (
+                            <Image
+                              src={reply.avatarUrl}
+                              alt={`${reply.username} avatar`}
+                              width={32}
+                              height={32}
+                              loading="lazy"
+                              className="h-8 w-8 rounded-full bg-gray-300 object-cover"
+                              draggable={false}
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+                              {reply.username.charAt(0).toUpperCase()}
+                            </div>
+                          )}
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -1206,7 +1322,7 @@ export default function SharedPlaybookView({
                     </div>
                   ) : null}
                 </div>
-              </div>
+              </motion.div>
             ))}
 
             {comments.length > 3 ? (
@@ -1223,14 +1339,14 @@ export default function SharedPlaybookView({
               value={newComment}
               onChange={(event) => setNewComment(event.target.value)}
               placeholder="Write a comment..."
-              className="mt-4 w-full rounded border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              className="mt-4 w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
               rows={3}
             />
             <button
               type="button"
               onClick={() => void handlePostComment()}
               disabled={postingComment || newComment.trim().length === 0}
-              className="mt-2 rounded bg-black px-3 py-1.5 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 rounded-md bg-black px-3 py-1.5 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {postingComment ? "Posting..." : "Post"}
             </button>
@@ -1250,9 +1366,12 @@ export default function SharedPlaybookView({
                     shouldProtectPaidPreview ? "cursor-default" : "cursor-pointer"
                   }`}
                 >
-                  <img
+                  <Image
                     src={s.image_url}
                     alt=""
+                    width={800}
+                    height={480}
+                    loading="lazy"
                     className={`h-40 w-full rounded-lg object-cover ${
                       shouldProtectPaidPreview ? "blur-sm" : ""
                     } transition-transform duration-200 ease-out group-hover:scale-[1.03]`}
@@ -1293,8 +1412,14 @@ export default function SharedPlaybookView({
               </button>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Full access to all screenshots, notes & annotations
+              </p>
               {renderPrimaryPreviewCta()}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {folder.is_paid ? "Instant access after purchase" : "Instant access after import"}
+              </p>
               <button
                 type="button"
                 onClick={() => setIsUnlocked(true)}
@@ -1335,10 +1460,13 @@ export default function SharedPlaybookView({
 
         <div className="relative h-[260px] w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm">
             {coverImageUrl ? (
-              <img
+              <Image
                 src={coverImageUrl}
                 alt="Playbook cover"
-                className="h-full w-full object-cover"
+                fill
+                priority
+                sizes="(min-width: 1024px) 1200px, 100vw"
+                className="object-cover"
                 draggable={false}
               />
             ) : (
@@ -1350,7 +1478,28 @@ export default function SharedPlaybookView({
 
             <div className="absolute bottom-4 left-4 right-4">
               <h1 className="line-clamp-2 text-2xl font-semibold text-gray-100">{folder.name}</h1>
-              <p className="mt-1 text-sm text-gray-300">by {authorName}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-200">
+                <span className="inline-flex items-center gap-1">
+                  <Heart size={14} className={liked ? "fill-red-500 text-red-500" : "text-gray-300"} />
+                  {likesCount}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <MessageCircle size={14} className="text-gray-300" />
+                  {comments.length}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Download size={14} className="text-gray-300" />
+                  {importsCount}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={openAuthorProfile}
+                disabled={!authorUsername}
+                className="mt-1 cursor-pointer text-sm text-gray-300 transition-colors hover:underline disabled:cursor-default disabled:no-underline"
+              >
+                by {authorName}
+              </button>
               <button
                 type="button"
                 onClick={() => void toggleLike()}
@@ -1361,7 +1510,7 @@ export default function SharedPlaybookView({
               >
                 <Heart
                   size={18}
-                  className={`${likePending ? "animate-pulse" : ""} ${
+                  className={`transition-transform duration-200 ${likeBouncing ? "scale-110" : "scale-100"} ${likePending ? "animate-pulse" : ""} ${
                     liked ? "fill-red-500 text-red-500" : "text-gray-300"
                   }`}
                 />
@@ -1420,24 +1569,34 @@ export default function SharedPlaybookView({
           ) : null}
         </div>
 
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={openAuthorProfile}
+          disabled={!authorUsername}
+          className="flex cursor-pointer items-center gap-3 disabled:cursor-default"
+        >
           {authorAvatarUrl ? (
-            <img
+            <Image
               src={authorAvatarUrl}
               alt={`${authorName} avatar`}
-              className="h-10 w-10 rounded-full object-cover transition-transform duration-200 hover:scale-105"
+              width={32}
+              height={32}
+              loading="lazy"
+              className="h-8 w-8 rounded-full bg-gray-300 object-cover"
               draggable={false}
             />
           ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-sm font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100">
+            <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
               {authorName.charAt(0).toUpperCase()}
             </div>
           )}
-          <div>
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{authorName}</p>
+          <div className="text-left">
+            <p className="text-sm font-medium text-gray-900 transition-colors hover:underline dark:text-gray-100">
+              {authorName}
+            </p>
             <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Creator</p>
           </div>
-        </div>
+        </button>
 
         {error ? (
           <div className="mb-6 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
@@ -1462,9 +1621,12 @@ export default function SharedPlaybookView({
                 onClick={() => setSelectedIndex(index)}
                 className="group relative cursor-pointer overflow-hidden rounded-xl bg-white shadow-sm transition-all duration-150 ease-in-out hover:bg-gray-100 hover:shadow-md"
               >
-                <img
+                <Image
                   src={shot.image_url}
                   alt=""
+                  width={800}
+                  height={480}
+                  loading="lazy"
                   draggable={false}
                   className={`h-40 w-full rounded-lg object-cover transition-transform duration-200 ease-out group-hover:scale-[1.03] md:h-48 ${
                     Boolean(folder.is_paid) && !isOwned ? "blur-sm" : ""
@@ -1483,18 +1645,68 @@ export default function SharedPlaybookView({
           )}
         </div>
 
-        <div className="flex justify-center">
+        <div className="flex flex-col items-center justify-center text-center">
+          <p className="mb-2 text-sm text-gray-700 dark:text-gray-300">
+            Full access to all screenshots, notes & annotations
+          </p>
           {renderPrimaryPreviewCta()}
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            {folder.is_paid ? "Instant access after purchase" : "Instant access after import"}
+          </p>
         </div>
 
         <div className="mt-8">
           <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Comments ({comments.length})</h3>
 
-          {visibleComments.map((comment) => (
-            <div key={comment.id} className="mt-4 flex gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-300 text-sm text-gray-700">
-                {comment.userInitial}
+          {commentsLoading ? (
+            <p className="mt-3 text-sm text-gray-700 dark:text-gray-300">Loading comments...</p>
+          ) : comments.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-5 py-8 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <div className="flex flex-col items-center justify-center text-center">
+                <MessageCircle size={24} className="text-gray-500 dark:text-gray-400" aria-hidden />
+                <p className="mt-3 text-base font-medium text-gray-900 dark:text-gray-100">No comments yet</p>
+                <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                  Be the first to share your thoughts
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const textarea = document.querySelector<HTMLTextAreaElement>(
+                      'textarea[placeholder="Write a comment..."]'
+                    );
+                    textarea?.focus();
+                  }}
+                  className="mt-4 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90"
+                >
+                  Write a comment
+                </button>
               </div>
+            </div>
+          ) : null}
+
+          {visibleComments.map((comment) => (
+            <motion.div
+              key={comment.id}
+              className="mt-4 flex gap-3"
+              initial={comment.id === newestCommentId ? { opacity: 0, y: 8 } : false}
+              animate={comment.id === newestCommentId ? { opacity: 1, y: 0 } : undefined}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+              {comment.avatarUrl ? (
+                <Image
+                  src={comment.avatarUrl}
+                  alt={`${comment.username} avatar`}
+                  width={32}
+                  height={32}
+                  loading="lazy"
+                  className="h-8 w-8 rounded-full bg-gray-300 object-cover"
+                  draggable={false}
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+                  {comment.username.charAt(0).toUpperCase()}
+                </div>
+              )}
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{comment.username}</span>
@@ -1518,14 +1730,14 @@ export default function SharedPlaybookView({
                       value={replyDraft}
                       onChange={(event) => setReplyDraft(event.target.value)}
                       placeholder="Write a reply..."
-                      className="w-full rounded border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                      className="w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                       rows={2}
                     />
                     <button
                       type="button"
                       onClick={() => void handlePostReply(comment.id)}
                       disabled={postingReplyParentId === comment.id || replyDraft.trim().length === 0}
-                      className="mt-2 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-2 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {postingReplyParentId === comment.id ? "Posting..." : "Post reply"}
                     </button>
@@ -1535,9 +1747,21 @@ export default function SharedPlaybookView({
                   <div className="ml-10 mt-2 space-y-2">
                     {comment.replies.map((reply) => (
                       <div key={reply.id} className="flex gap-2">
-                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-xs text-gray-600">
-                          {reply.userInitial}
-                        </div>
+                        {reply.avatarUrl ? (
+                          <Image
+                            src={reply.avatarUrl}
+                            alt={`${reply.username} avatar`}
+                            width={32}
+                            height={32}
+                            loading="lazy"
+                            className="h-8 w-8 rounded-full bg-gray-300 object-cover"
+                            draggable={false}
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full object-cover bg-gray-300 flex items-center justify-center text-xs font-medium">
+                            {reply.username.charAt(0).toUpperCase()}
+                          </div>
+                        )}
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -1556,7 +1780,7 @@ export default function SharedPlaybookView({
                   </div>
                 ) : null}
               </div>
-            </div>
+            </motion.div>
           ))}
 
           {comments.length > 3 ? (
@@ -1573,14 +1797,14 @@ export default function SharedPlaybookView({
             value={newComment}
             onChange={(event) => setNewComment(event.target.value)}
             placeholder="Write a comment..."
-            className="mt-4 w-full rounded border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            className="mt-4 w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             rows={3}
           />
           <button
             type="button"
             onClick={() => void handlePostComment()}
             disabled={postingComment || newComment.trim().length === 0}
-            className="mt-2 rounded bg-black px-3 py-1.5 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 rounded-md bg-black px-3 py-1.5 text-sm font-medium text-white transition-all duration-150 ease-in-out hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {postingComment ? "Posting..." : "Post"}
           </button>

@@ -1,0 +1,84 @@
+/**
+ * Shirumi design tokens.
+ * Root tokens define foundational primitives.
+ * Theme blocks map semantic color tokens for light/dark mode.
+ */
+
+:root {
+  /* Font families (wired to Next font vars in layout). */
+  --font-family-sans: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  --font-family-mono: var(--font-geist-mono), "Courier New", Courier, monospace;
+
+  /* Typography scale. */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-lg: 1.125rem;
+  --font-size-2xl: 1.5rem;
+  --line-height-tight: 1.25;
+  --line-height-snug: 1.375;
+  --line-height-normal: 1.5;
+
+  /* Spacing scale. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+
+  /* Radius scale. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-pill: 9999px;
+
+  /* Shadow scale. */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  /* Motion scale. */
+  --motion-duration-fast: 0.15s;
+  --motion-duration-medium: 0.18s;
+  --motion-duration-slow: 0.2s;
+  --motion-ease-standard: ease-in-out;
+  --motion-ease-out: ease-out;
+}
+
+:root,
+:root[data-theme="light"] {
+  --background: #f9fafb;
+  --foreground: #111827;
+  --surface: #ffffff;
+  --surface-muted: #f3f4f6;
+  --border: #e5e7eb;
+  --text-muted: #6b7280;
+  --primary: #111827;
+  --primary-foreground: #ffffff;
+  --danger: #dc2626;
+}
+
+:root[data-theme="dark"] {
+  --background: #0b1220;
+  --foreground: #e5e7eb;
+  --surface: #111827;
+  --surface-muted: #1f2937;
+  --border: #374151;
+  --text-muted: #9ca3af;
+  --primary: #e5e7eb;
+  --primary-foreground: #111827;
+  --danger: #f87171;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    --surface: #111827;
+    --surface-muted: #1f2937;
+    --border: #374151;
+    --text-muted: #9ca3af;
+    --primary: #e5e7eb;
+    --primary-foreground: #111827;
+    --danger: #f87171;
+  }
+}

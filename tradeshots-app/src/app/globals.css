@@ -4,34 +4,10 @@
  * for legacy gray Tailwind classes used in the UI.
  */
 @import "tailwindcss";
+@import "../styles/tokens.css";
 
 /* Map Tailwind's `dark:` variant to the app's data-theme system. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
-
-:root,
-:root[data-theme="light"] {
-  --background: #f9fafb;
-  --foreground: #111827;
-  --surface: #ffffff;
-  --surface-muted: #f3f4f6;
-  --border: #e5e7eb;
-  --text-muted: #6b7280;
-  --primary: #111827;
-  --primary-foreground: #ffffff;
-  --danger: #dc2626;
-}
-
-:root[data-theme="dark"] {
-  --background: #0b1220;
-  --foreground: #e5e7eb;
-  --surface: #111827;
-  --surface-muted: #1f2937;
-  --border: #374151;
-  --text-muted: #9ca3af;
-  --primary: #e5e7eb;
-  --primary-foreground: #111827;
-  --danger: #f87171;
-}
 
 @theme inline {
   --color-background: var(--background);
@@ -43,22 +19,8 @@
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-danger: var(--danger);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --surface: #111827;
-    --surface-muted: #1f2937;
-    --border: #374151;
-    --text-muted: #9ca3af;
-    --primary: #e5e7eb;
-    --primary-foreground: #111827;
-    --danger: #f87171;
-  }
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
 }
 
 body {
