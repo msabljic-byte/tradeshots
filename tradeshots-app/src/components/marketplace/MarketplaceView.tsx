@@ -4,7 +4,14 @@
  * Marketplace discovery (embedded in dashboard layout).
  * Lists public playbooks, search, filters, sort.
  */
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type MouseEvent,
+  type SetStateAction,
+} from "react";
 import { Flame, Mic, Pencil, Search } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import SkeletonCard from "@/components/marketplace/SkeletonCard";
@@ -42,9 +49,11 @@ export type MarketplaceAuthorProfile = {
 export default function MarketplaceView({
   onOpenPlaybook,
   onOpenAuthorProfile,
+  onLogoClick,
 }: {
   onOpenPlaybook?: (playbook: MarketplacePlaybook) => void;
   onOpenAuthorProfile?: (author: MarketplaceAuthorProfile) => void;
+  onLogoClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -327,7 +336,14 @@ export default function MarketplaceView({
     <div className="app-shell-content space-y-8">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-4">
-          <Logo variant="horizontal" sealSize="sm" />
+          <a
+            href="/dashboard"
+            onClick={onLogoClick}
+            className="inline-flex cursor-pointer items-center gap-3 transition-opacity hover:opacity-80"
+            aria-label="Shirumi - return to dashboard"
+          >
+            <Logo variant="horizontal" sealSize="sm" />
+          </a>
           <h1 className="app-section-title">Marketplace</h1>
         </div>
         <select

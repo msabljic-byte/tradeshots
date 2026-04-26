@@ -18,6 +18,7 @@
  * Navigation: every `useEffect` is preceded by a short `// useEffect:` line (what it does and key deps).
  */
 import {
+  type MouseEvent,
   Suspense,
   useCallback,
   useEffect,
@@ -519,6 +520,28 @@ function DashboardPageContent() {
       router.replace(qs ? `/dashboard?${qs}` : `/dashboard`);
     },
     [dismissedMarketplaceHint, router, searchParams]
+  );
+  const handleLogoHomeClick = useCallback(
+    (e: MouseEvent<HTMLAnchorElement>) => {
+      if (
+        e.defaultPrevented ||
+        e.button !== 0 ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.shiftKey ||
+        e.altKey
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setActiveView("dashboard");
+      setSelectedPlaybook(null);
+      setSelectedProfile(null);
+      setActiveFolderId(null);
+      setActiveViewId(null);
+      router.push("/dashboard", { scroll: false });
+    },
+    [router]
   );
   const openPlaybookPreview = useCallback(
     (playbook: MarketplacePlaybook) => {
@@ -5148,7 +5171,14 @@ function DashboardPageContent() {
         onDragOver={(e) => e.preventDefault()}
       >
         <h1 className="mb-5 px-3">
-          <Logo variant="horizontal" sealSize="md" />
+          <a
+            href="/dashboard"
+            onClick={handleLogoHomeClick}
+            className="inline-flex cursor-pointer items-center gap-3 transition-opacity hover:opacity-80"
+            aria-label="Shirumi - return to dashboard"
+          >
+            <Logo variant="horizontal" sealSize="md" />
+          </a>
         </h1>
 
         <div className="space-y-4">
@@ -5569,6 +5599,7 @@ function DashboardPageContent() {
                   <MarketplaceView
                     onOpenPlaybook={openPlaybookPreview}
                     onOpenAuthorProfile={openAuthorProfile}
+                    onLogoClick={handleLogoHomeClick}
                   />
                 </motion.div>
               ) : activeView === "playbook" ? (

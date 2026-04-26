@@ -44,7 +44,13 @@ export default function SignupPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6 font-sans">
       <div className="flex w-full max-w-md flex-col items-center gap-4">
-        <Logo variant="stacked" sealSize="lg" />
+        <Link
+          href="/dashboard"
+          className="inline-flex cursor-pointer items-center gap-3 transition-opacity hover:opacity-80"
+          aria-label="Shirumi - return to dashboard"
+        >
+          <Logo variant="stacked" sealSize="lg" />
+        </Link>
         <AuthForm mode="signup" />
 
         <p className="app-body text-center">
