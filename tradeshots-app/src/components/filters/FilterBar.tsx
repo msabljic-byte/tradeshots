@@ -7,6 +7,7 @@ type FilterBarProps = {
   quickFilters: QuickFilters;
   hasActiveDashboardFilters: boolean;
   onSearchChange: (value: string) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
   onToggleQuickFilter: (key: keyof QuickFilters) => void;
   showFilterMenu: boolean;
   onToggleFilterMenu: () => void;
@@ -19,6 +20,7 @@ export function FilterBar({
   quickFilters,
   hasActiveDashboardFilters,
   onSearchChange,
+  searchInputRef,
   onToggleQuickFilter,
   showFilterMenu,
   onToggleFilterMenu,
@@ -34,6 +36,7 @@ export function FilterBar({
           aria-hidden
         />
         <input
+          ref={searchInputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}

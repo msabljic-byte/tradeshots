@@ -11,6 +11,7 @@
   "dependencies": {
     "@stripe/stripe-js": "^9.0.0",
     "@supabase/supabase-js": "^2.99.2",
+    "cmdk": "^1.1.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.577.0",
     "next": "16.2.0",

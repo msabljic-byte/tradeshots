@@ -46,6 +46,9 @@ import { FilterBar } from "@/components/filters/FilterBar";
 import { buildActiveFilterChips } from "@/components/filters/buildActiveFilterChips";
 import { useFilterState } from "@/components/filters/useFilterState";
 import type { QuickFilters } from "@/components/filters/types";
+import { useKeyboardShortcuts } from "@/components/shortcuts/useKeyboardShortcuts";
+import { ShortcutHelpOverlay } from "@/components/shortcuts/ShortcutHelpOverlay";
+import { CommandPalette } from "@/components/shortcuts/CommandPalette";
 import { SaveViewDialog } from "@/components/views/SaveViewDialog";
 import { SavedViewsSection } from "@/components/views/SavedViewsSection";
 import {
@@ -598,11 +601,11 @@ function DashboardPageContent() {
   >({});
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [isCommandOpen, setIsCommandOpen] = useState(false);
-  const [commandQuery, setCommandQuery] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [draggedScreenshotId, setDraggedScreenshotId] = useState<string[]>([]);
   const [hoverFolderId, setHoverFolderId] = useState<string | null>(null);
-  const [commandActiveIndex, setCommandActiveIndex] = useState<number>(-1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<any[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -2210,24 +2213,14 @@ function DashboardPageContent() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
-  // useEffect: global shortcuts — ⌘/Ctrl+K command palette, ⌘/Ctrl+A select visible grid, Escape clear selection.
+  // useEffect: global shortcut — ⌘/Ctrl+A select visible grid.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setIsCommandOpen((prev) => !prev);
-      }
-
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
         const visible = applyDashboardScreenshotFilters(screenshots);
 
         setSelectedIds(visible.map((s) => s.id));
-      }
-
-      if (e.key === "Escape") {
-        setSelectedIds([]);
-        setIsCommandOpen(false);
       }
     }
 
@@ -4169,50 +4162,6 @@ function DashboardPageContent() {
     await syncSharedPlaybookAndNotifyImporters(supabase, String(folderId));
   }
 
-  const commandViewResults = useMemo(() => {
-    const q = commandQuery.trim().toLowerCase();
-    const source = savedViews ?? [];
-    if (!q) return source.slice(0, 12);
-    return source
-      .filter((v) => String(v?.name ?? "").toLowerCase().includes(q))
-      .slice(0, 12);
-  }, [savedViews, commandQuery]);
-
-  const commandScreenshotResults = useMemo(() => {
-    const q = commandQuery.trim().toLowerCase();
-    if (!q) return [];
-    return screenshots
-      .filter((s) => {
-        const inNotes = String(s?.notes ?? "").toLowerCase().includes(q);
-        const inTags = (s.tags ?? []).some((tag) =>
-          String(tag).toLowerCase().includes(q)
-        );
-        return inNotes || inTags;
-      })
-      .slice(0, 20);
-  }, [screenshots, commandQuery]);
-
-  const commandItems = useMemo(
-    () => [
-      ...commandViewResults.map((view: any) => ({
-        type: "view" as const,
-        id: String(view.id),
-        label: String(view.name ?? ""),
-        payload: view,
-      })),
-      ...commandScreenshotResults.map((shot) => ({
-        type: "screenshot" as const,
-        id: String(shot.id),
-        label:
-          shot.tags && shot.tags.length > 0
-            ? shot.tags.join(", ")
-            : String(shot.notes ?? "Open screenshot"),
-        payload: shot,
-      })),
-    ],
-    [commandViewResults, commandScreenshotResults]
-  );
-
   const newScreenshotCountByFolderId = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of allScreenshots as ScreenshotRow[]) {
@@ -4448,18 +4397,6 @@ function DashboardPageContent() {
       ));
   }
 
-  function executeCommandItem(item: (typeof commandItems)[number]) {
-    if (!item) return;
-    if (item.type === "view") {
-      applyView(item.payload);
-      setIsCommandOpen(false);
-      return;
-    }
-
-    openScreenshotFromCommand(item.id);
-    setIsCommandOpen(false);
-  }
-
   function distancePointToSegment(
     px: number,
     py: number,
@@ -4531,59 +4468,48 @@ function DashboardPageContent() {
     return null;
   }
 
-  // useEffect: command palette — reset or clamp active row when open state or list length changes.
-  useEffect(() => {
-    if (!isCommandOpen) {
-      setCommandActiveIndex(-1);
+  const handleFocusSearch = useCallback(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
+  const handleEscape = useCallback(() => {
+    if (paletteOpen) {
+      setPaletteOpen(false);
       return;
     }
-
-    if (commandItems.length === 0) {
-      setCommandActiveIndex(-1);
+    if (helpOpen) {
+      setHelpOpen(false);
       return;
     }
-
-    setCommandActiveIndex((prev) =>
-      prev < 0 || prev >= commandItems.length ? 0 : prev
-    );
-  }, [isCommandOpen, commandItems.length]);
-
-  // useEffect: command palette keyboard — arrow navigation and Enter to run highlighted item.
-  useEffect(() => {
-    if (!isCommandOpen) return;
-
-    function handleCommandNav(e: KeyboardEvent) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        if (commandItems.length === 0) return;
-        setCommandActiveIndex((prev) =>
-          prev < 0 ? 0 : (prev + 1) % commandItems.length
-        );
-        return;
-      }
-
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (commandItems.length === 0) return;
-        setCommandActiveIndex((prev) =>
-          prev < 0
-            ? commandItems.length - 1
-            : (prev - 1 + commandItems.length) % commandItems.length
-        );
-        return;
-      }
-
-      if (e.key === "Enter") {
-        if (commandActiveIndex < 0 || commandActiveIndex >= commandItems.length)
-          return;
-        e.preventDefault();
-        executeCommandItem(commandItems[commandActiveIndex]);
-      }
+    if (saveDialogOpen) {
+      setSaveDialogOpen(false);
+      return;
     }
+    if (renameDialogView) {
+      setRenameDialogView(null);
+      return;
+    }
+    if (showFilterMenu) {
+      setShowFilterMenu(false);
+      return;
+    }
+    setSelectedIds([]);
+  }, [helpOpen, paletteOpen, renameDialogView, saveDialogOpen, showFilterMenu]);
 
-    window.addEventListener("keydown", handleCommandNav);
-    return () => window.removeEventListener("keydown", handleCommandNav);
-  }, [isCommandOpen, commandItems, commandActiveIndex]);
+  const handleTogglePalette = useCallback(() => {
+    setPaletteOpen((v) => !v);
+  }, []);
+
+  const handleOpenHelp = useCallback(() => {
+    setHelpOpen(true);
+  }, []);
+
+  useKeyboardShortcuts({
+    onFocusSearch: handleFocusSearch,
+    onTogglePalette: handleTogglePalette,
+    onOpenHelp: handleOpenHelp,
+    onEscape: handleEscape,
+  });
 
   // useEffect: annotation canvas — match canvas pixel size to displayed image, redraw on resize or shape data.
   useEffect(() => {
@@ -5355,7 +5281,7 @@ function DashboardPageContent() {
           <div className="w-full max-w-md">
             <button
               type="button"
-              onClick={() => setIsCommandOpen(true)}
+              onClick={() => setPaletteOpen(true)}
               className="ui-button flex w-full items-center justify-between px-4 py-2 text-sm cursor-pointer"
             >
               <span>Search or jump to…</span>
@@ -5790,6 +5716,7 @@ function DashboardPageContent() {
                   quickFilters={quickFilters}
                   hasActiveDashboardFilters={hasActiveDashboardFilters}
                   onSearchChange={setSearchQuery}
+                  searchInputRef={searchInputRef}
                   onToggleQuickFilter={handleToggleQuickFilter}
                   showFilterMenu={showFilterMenu}
                   onToggleFilterMenu={() => {
@@ -7459,104 +7386,32 @@ function DashboardPageContent() {
         onConfirm={handleConfirmRename}
         onCancel={() => setRenameDialogView(null)}
       />
+      <CommandPalette
+        key={paletteOpen ? "palette-open" : "palette-closed"}
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onGoToDashboard={() => navigateDashboardView("dashboard")}
+        onGoToMarketplace={() => navigateDashboardView("marketplace")}
+        onToggleQuickFilter={handleToggleQuickFilter}
+        onClearAllFilters={() => {
+          clearAllFilters();
+          setActiveViewId(null);
+        }}
+        savedViews={savedViews as SavedView[]}
+        onApplySavedView={(view) => {
+          applyView(view);
+        }}
+        screenshots={screenshots.map((s) => ({
+          id: s.id,
+          tags: s.tags,
+          notes: s.notes,
+          created_at: s.created_at,
+        }))}
+        attributesByScreenshot={attributesByScreenshot}
+        onOpenScreenshot={(id) => openScreenshotFromCommand(id)}
+      />
 
-      {isCommandOpen && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-start justify-center bg-black/40 pt-32"
-          onClick={() => setIsCommandOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xl rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden animate-dropdown-in transition-all duration-150 ease-in-out"
-          >
-            <input
-              autoFocus
-              value={commandQuery}
-              onChange={(e) => setCommandQuery(e.target.value)}
-              placeholder="Search screenshots, views..."
-              className="w-full border-b border-gray-200 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 outline-none"
-            />
-
-            <div className="max-h-80 overflow-y-auto">
-              {commandViewResults.length > 0 && (
-                <div className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                  Saved Views
-                </div>
-              )}
-              {commandViewResults.map((view) => {
-                const flatIndex = commandItems.findIndex(
-                  (item) => item.type === "view" && item.id === String(view.id)
-                );
-                return (
-                  <div
-                    key={`view-${view.id}`}
-                    onClick={() =>
-                      executeCommandItem({
-                        type: "view",
-                        id: String(view.id),
-                        label: String(view.name ?? ""),
-                        payload: view,
-                      })
-                    }
-                    className={`cursor-pointer px-4 py-2 text-sm text-gray-800 hover:bg-gray-100 ${
-                      flatIndex === commandActiveIndex ? "bg-gray-100" : ""
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Search size={16} className="text-gray-600" aria-hidden />
-                      {view.name}
-                    </span>
-                  </div>
-                );
-              })}
-
-              {commandScreenshotResults.length > 0 && (
-                <div className="border-b border-t border-gray-100 px-4 py-2 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                  Screenshots
-                </div>
-              )}
-              {commandScreenshotResults.map((shot) => {
-                const flatIndex = commandItems.findIndex(
-                  (item) =>
-                    item.type === "screenshot" && item.id === String(shot.id)
-                );
-                const preview =
-                  shot.tags && shot.tags.length > 0
-                    ? shot.tags.join(", ")
-                    : shot.notes || "Open screenshot";
-                return (
-                  <div
-                    key={`shot-${shot.id}`}
-                    onClick={() =>
-                      executeCommandItem({
-                        type: "screenshot",
-                        id: String(shot.id),
-                        label: String(preview),
-                        payload: shot,
-                      })
-                    }
-                    className={`cursor-pointer px-4 py-2 text-sm text-gray-800 hover:bg-gray-100 ${
-                      flatIndex === commandActiveIndex ? "bg-gray-100" : ""
-                    }`}
-                  >
-                    <ImageIcon
-                      className="mr-2 inline-block w-4 h-4 text-gray-600"
-                      aria-hidden
-                    />
-                    {preview}
-                  </div>
-                );
-              })}
-
-              {commandItems.length === 0 && (
-                <div className="px-4 py-3 text-sm text-gray-500">
-                  No matches yet.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <ShortcutHelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }
