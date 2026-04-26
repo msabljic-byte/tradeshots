@@ -1,5 +1,5 @@
 import type React from "react";
-import { MessageSquare, Mic, MoreHorizontal, Pencil, Plus, Search } from "lucide-react";
+import { MessageSquare, Mic, Pencil, Plus, Search } from "lucide-react";
 import type { QuickFilters } from "./types";
 
 type FilterBarProps = {
@@ -12,10 +12,6 @@ type FilterBarProps = {
   onToggleFilterMenu: () => void;
   filterMenuRef: React.RefObject<HTMLDivElement | null>;
   renderFilterMenuContent: () => React.ReactNode;
-  showFilterOverflowMenu: boolean;
-  onToggleFilterOverflowMenu: () => void;
-  filterOverflowMenuRef: React.RefObject<HTMLDivElement | null>;
-  renderFilterOverflowMenuContent: () => React.ReactNode;
 };
 
 export function FilterBar({
@@ -28,10 +24,6 @@ export function FilterBar({
   onToggleFilterMenu,
   filterMenuRef,
   renderFilterMenuContent,
-  showFilterOverflowMenu,
-  onToggleFilterOverflowMenu,
-  filterOverflowMenuRef,
-  renderFilterOverflowMenuContent,
 }: FilterBarProps) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -123,19 +115,6 @@ export function FilterBar({
         {showFilterMenu ? renderFilterMenuContent() : null}
       </div>
 
-      {hasActiveDashboardFilters ? (
-        <div className="relative" ref={filterOverflowMenuRef}>
-          <button
-            type="button"
-            onClick={onToggleFilterOverflowMenu}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color:var(--border-strong)] bg-transparent text-muted transition hover:bg-surface hover:text-foreground"
-            aria-label="Filter actions"
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
-          </button>
-          {showFilterOverflowMenu ? renderFilterOverflowMenuContent() : null}
-        </div>
-      ) : null}
     </div>
   );
 }

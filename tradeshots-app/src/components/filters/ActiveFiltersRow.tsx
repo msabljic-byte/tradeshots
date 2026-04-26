@@ -9,9 +9,10 @@ type ActiveFilterChip = {
 type ActiveFiltersRowProps = {
   chips: ActiveFilterChip[];
   onClearAll: () => void;
+  onSaveView: () => void;
 };
 
-export function ActiveFiltersRow({ chips, onClearAll }: ActiveFiltersRowProps) {
+export function ActiveFiltersRow({ chips, onClearAll, onSaveView }: ActiveFiltersRowProps) {
   if (chips.length === 0) return null;
 
   return (
@@ -36,6 +37,14 @@ export function ActiveFiltersRow({ chips, onClearAll }: ActiveFiltersRowProps) {
           </button>
         </div>
       ))}
+      {chips.length > 0 && (
+        <button
+          onClick={onSaveView}
+          className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+        >
+          Save view
+        </button>
+      )}
       {chips.length > 1 && (
         <button
           onClick={onClearAll}

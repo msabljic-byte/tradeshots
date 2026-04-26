@@ -42,10 +42,17 @@ import { Logo } from "@/components/brand/Logo";
 import { AddFilterMenu } from "@/components/filters/AddFilterMenu";
 import { ActiveFiltersRow } from "@/components/filters/ActiveFiltersRow";
 import { FilterBar } from "@/components/filters/FilterBar";
-import { FilterOverflowMenu } from "@/components/filters/FilterOverflowMenu";
 import { buildActiveFilterChips } from "@/components/filters/buildActiveFilterChips";
 import { useFilterState } from "@/components/filters/useFilterState";
 import type { QuickFilters } from "@/components/filters/types";
+import { SaveViewDialog } from "@/components/views/SaveViewDialog";
+import { SavedViewsSection } from "@/components/views/SavedViewsSection";
+import {
+  filterStateToSavedViewFilters,
+  filtersEqual,
+  savedViewToFilterState,
+  type SavedView,
+} from "@/components/views/savedViewUtils";
 import { supabase } from "@/lib/supabaseClient";
 import {
   syncSharedPlaybookAndNotifyImporters,
@@ -608,11 +615,11 @@ function DashboardPageContent() {
   const [isAnnotationToolbarOpen, setIsAnnotationToolbarOpen] = useState(true);
   const [showStrokeSizePopover, setShowStrokeSizePopover] = useState(false);
 
-  const [savedViews, setSavedViews] = useState<any[]>([]);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
-  const [showFilterOverflowMenu, setShowFilterOverflowMenu] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [renameDialogView, setRenameDialogView] = useState<SavedView | null>(null);
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
-  const filterOverflowMenuRef = useRef<HTMLDivElement | null>(null);
   const [folders, setFolders] = useState<any[]>([]);
   const topLevelFolders = useMemo(
     () => (folders ?? []).filter((f: any) => f.parent_id == null),
@@ -686,29 +693,6 @@ function DashboardPageContent() {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [showFilterMenu]);
-  // useEffect: close filter overflow menu on outside click / Escape.
-  useEffect(() => {
-    if (!showFilterOverflowMenu) return;
-    const onMouseDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (
-        filterOverflowMenuRef.current &&
-        target &&
-        !filterOverflowMenuRef.current.contains(target)
-      ) {
-        setShowFilterOverflowMenu(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShowFilterOverflowMenu(false);
-    };
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [showFilterOverflowMenu]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -1257,7 +1241,7 @@ function DashboardPageContent() {
       .select("*")
       .eq("user_id", user.id);
 
-    setSavedViews(data || []);
+    setSavedViews((data ?? []) as SavedView[]);
   }
 
   async function fetchFolders() {
@@ -1795,8 +1779,7 @@ function DashboardPageContent() {
     }
   }
 
-  async function handleSaveView(name?: string) {
-    const trimmedName = (name ?? "").trim();
+  function handleOpenSaveDialog() {
     const hasAnyFilter =
       filters.length > 0 ||
       tagFilter.trim().length > 0 ||
@@ -1804,26 +1787,45 @@ function DashboardPageContent() {
       quickFilters.voice ||
       quickFilters.annotations ||
       quickFilters.notes ||
-      quickFilters.favorites;
-    if (!trimmedName || !hasAnyFilter) return;
+      quickFilters.favorites ||
+      Boolean(dateRangeFilter.from) ||
+      Boolean(dateRangeFilter.to) ||
+      Boolean(playbookFilter);
+    if (!hasAnyFilter) return;
+    setSaveDialogOpen(true);
+  }
+
+  async function handleSaveView(name: string) {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
 
     const user = (await supabase.auth.getUser()).data.user;
     if (!user) return;
 
-    await supabase.from("saved_views").insert({
+    const { data, error } = await supabase
+      .from("saved_views")
+      .insert({
       user_id: user.id,
       name: trimmedName,
-      filters: {
-        attributeFilters: filters,
-        tagFilter,
-        searchQuery,
-        quickFilters,
-      },
-    });
+        filters: filterStateToSavedViewFilters({
+          filters,
+          tagFilter,
+          searchQuery,
+          quickFilters,
+          dateRangeFilter,
+          playbookFilter,
+        }),
+      })
+      .select()
+      .single();
+    if (!error && data) {
+      setActiveViewId(data.id);
+    }
     await fetchSavedViews();
+    setSaveDialogOpen(false);
   }
 
-  function applyView(view: any) {
+  function applyView(view: SavedView) {
     if (!view?.filters) return;
     // Backward compatibility: older saved views stored `filters` as array only.
     if (Array.isArray(view.filters)) {
@@ -1843,6 +1845,8 @@ function DashboardPageContent() {
         notes?: boolean;
         favorites?: boolean;
       };
+      dateRangeFilter?: { from: string | null; to: string | null };
+      playbookFilter?: string | null;
     };
     setFilters(payload.attributeFilters ?? []);
     setTagFilter(String(payload.tagFilter ?? ""));
@@ -1853,26 +1857,45 @@ function DashboardPageContent() {
       notes: Boolean(payload.quickFilters?.notes),
       favorites: Boolean(payload.quickFilters?.favorites),
     });
+    setDateRangeFilter(payload.dateRangeFilter ?? { from: null, to: null });
+    setPlaybookFilter(payload.playbookFilter ?? null);
     setActiveViewId(view.id);
   }
 
-  async function deleteView(id: string) {
-    await supabase.from("saved_views").delete().eq("id", id);
-
-    setSavedViews((prev) => prev.filter((v) => v.id !== id));
-
-    if (activeViewId === id) {
-      setActiveViewId(null);
-      clearAllFilters();
-    }
-  }
-
-  async function renameView(id: string, newName: string) {
+  async function handleUpdateView(view: SavedView) {
     await supabase
       .from("saved_views")
-      .update({ name: newName })
-      .eq("id", id);
+      .update({
+        filters: filterStateToSavedViewFilters({
+          filters,
+          tagFilter,
+          searchQuery,
+          quickFilters,
+          dateRangeFilter,
+          playbookFilter,
+        }),
+      })
+      .eq("id", view.id);
+    await fetchSavedViews();
+  }
 
+  async function handleRenameView(view: SavedView) {
+    setRenameDialogView(view);
+  }
+
+  async function handleConfirmRename(newName: string) {
+    if (!renameDialogView) return;
+    await supabase
+      .from("saved_views")
+      .update({ name: newName.trim() })
+      .eq("id", renameDialogView.id);
+    setRenameDialogView(null);
+    await fetchSavedViews();
+  }
+
+  async function handleDeleteView(view: SavedView) {
+    await supabase.from("saved_views").delete().eq("id", view.id);
+    if (activeViewId === view.id) setActiveViewId(null);
     await fetchSavedViews();
   }
 
@@ -3188,6 +3211,35 @@ function DashboardPageContent() {
       playbookFilter,
     ]
   );
+  const activeSavedView = useMemo(
+    () => savedViews.find((v) => v.id === activeViewId) ?? null,
+    [savedViews, activeViewId]
+  );
+  const isViewModified = useMemo(() => {
+    if (!activeSavedView) return false;
+    const stored = savedViewToFilterState(activeSavedView);
+    const current = {
+      filters,
+      tagFilter,
+      searchQuery,
+      quickFilters,
+      dateRangeFilter,
+      playbookFilter,
+    };
+    return !filtersEqual(stored, current);
+  }, [
+    activeSavedView,
+    filters,
+    tagFilter,
+    searchQuery,
+    quickFilters,
+    dateRangeFilter,
+    playbookFilter,
+  ]);
+  const handleClearAllDashboardFilters = useCallback(() => {
+    clearAllFilters();
+    setActiveViewId(null);
+  }, [clearAllFilters]);
   const counterText = useMemo(() => {
     const totalCount = screenshots.length;
     const filteredCount = filteredScreenshots.length;
@@ -5192,6 +5244,15 @@ function DashboardPageContent() {
           ) : (
             <div className="space-y-2">{renderFolders(null, 0)}</div>
           )}
+          <SavedViewsSection
+            savedViews={savedViews}
+            activeViewId={activeViewId}
+            isModified={isViewModified}
+            onApply={applyView}
+            onRename={handleRenameView}
+            onDelete={handleDeleteView}
+            onUpdate={handleUpdateView}
+          />
         </div>
         </div>
 
@@ -5670,49 +5731,6 @@ function DashboardPageContent() {
               ) : (
               <>
               <div className="mb-6 rounded-xl border border-default bg-elevated p-5">
-                <div className="mb-6 flex flex-wrap gap-2">
-                  {savedViews.map((view) => (
-                    <div key={view.id} className="group flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => applyView(view)}
-                        className={`
-                          micro-pill rounded-full px-3 py-1.5 transition
-                          ${activeViewId === view.id
-                            ? "bg-gray-900 text-white"
-                            : "bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                          }
-                        `}
-                      >
-                        {view.name}
-                      </button>
-
-                      <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newName = prompt("Rename view", view.name);
-                            if (newName) {
-                              void renameView(view.id, newName);
-                            }
-                          }}
-                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                        >
-                          <Pencil size={16} className="text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => void deleteView(view.id)}
-                          className="rounded p-1.5 text-gray-600 transition hover:bg-gray-200 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
-                        >
-                          <Trash2 size={16} className="text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" aria-hidden />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
                 <ActiveFiltersRow
                   chips={buildActiveFilterChips({
                     tagFilter,
@@ -5732,7 +5750,8 @@ function DashboardPageContent() {
                     onSetPlaybook: setPlaybookFilter,
                     onToggleQuickFilter: handleToggleQuickFilter,
                   })}
-                  onClearAll={clearAllFilters}
+                  onSaveView={handleOpenSaveDialog}
+                  onClearAll={handleClearAllDashboardFilters}
                 />
 
                 <FilterBar
@@ -5744,7 +5763,6 @@ function DashboardPageContent() {
                   showFilterMenu={showFilterMenu}
                   onToggleFilterMenu={() => {
                     setShowFilterMenu((prev) => !prev);
-                    setShowFilterOverflowMenu(false);
                   }}
                   filterMenuRef={filterMenuRef}
                   renderFilterMenuContent={() => (
@@ -5767,19 +5785,6 @@ function DashboardPageContent() {
                       onClose={() => setShowFilterMenu(false)}
                     />
                   )}
-                  showFilterOverflowMenu={showFilterOverflowMenu}
-                  onToggleFilterOverflowMenu={() => {
-                    setShowFilterOverflowMenu((prev) => !prev);
-                    setShowFilterMenu(false);
-                  }}
-                  filterOverflowMenuRef={filterOverflowMenuRef}
-                  renderFilterOverflowMenuContent={() => (
-                    <FilterOverflowMenu
-                      savedViewsCount={savedViews.length}
-                      onSaveView={(name) => void handleSaveView(name)}
-                      onClose={() => setShowFilterOverflowMenu(false)}
-                    />
-                  )}
                 />
 
 
@@ -5800,7 +5805,7 @@ function DashboardPageContent() {
                     Try adjusting or clearing them.
                   </p>
                   <button
-                    onClick={clearAllFilters}
+                    onClick={handleClearAllDashboardFilters}
                     className="rounded-[var(--radius-md)] border border-[var(--border-strong)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-shadow)]"
                   >
                     Clear all filters
@@ -7407,6 +7412,22 @@ function DashboardPageContent() {
           </div>,
           document.body
         )}
+
+      <SaveViewDialog
+        key={saveDialogOpen ? "save-view-open" : "save-view-closed"}
+        open={saveDialogOpen}
+        isUpdate={false}
+        onConfirm={handleSaveView}
+        onCancel={() => setSaveDialogOpen(false)}
+      />
+      <SaveViewDialog
+        key={renameDialogView?.id ?? "rename-view-closed"}
+        open={renameDialogView !== null}
+        isUpdate
+        initialName={renameDialogView?.name ?? ""}
+        onConfirm={handleConfirmRename}
+        onCancel={() => setRenameDialogView(null)}
+      />
 
       {isCommandOpen && (
         <div
