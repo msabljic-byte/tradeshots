@@ -498,6 +498,16 @@ function DashboardPageContent() {
         params.delete("playbook");
         params.delete("profile");
       }
+      // Clear dashboard filter params on any cross-section navigation.
+      // Filter state is a dashboard concern and should not persist
+      // across section changes.
+      params.delete("q");
+      params.delete("tag");
+      params.delete("attr");
+      params.delete("qf");
+      params.delete("dfrom");
+      params.delete("dto");
+      params.delete("pb");
       const qs = params.toString();
       router.replace(qs ? `/dashboard?${qs}` : `/dashboard`);
     },
