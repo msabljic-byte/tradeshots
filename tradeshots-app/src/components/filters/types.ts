@@ -10,7 +10,7 @@ export type QuickFilters = {
 };
 
 export type FilterState = {
-  tagFilter: string;
+  tagFilters: string[];
   searchQuery: string;
   filters: AttributeFilter[];
   quickFilters: QuickFilters;
@@ -19,7 +19,10 @@ export type FilterState = {
 };
 
 export type FilterActions = {
-  setTagFilter: (value: string) => void;
+  setTagFilters: React.Dispatch<React.SetStateAction<string[]>>;
+  addTagFilter: (tag: string) => void;
+  removeTagFilter: (tag: string) => void;
+  toggleTagFilter: (tag: string) => void;
   setSearchQuery: (value: string) => void;
   setFilters: React.Dispatch<React.SetStateAction<AttributeFilter[]>>;
   setQuickFilters: React.Dispatch<React.SetStateAction<QuickFilters>>;

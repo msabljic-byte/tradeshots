@@ -16,7 +16,7 @@ export function useFilterState(): FilterState & FilterActions {
 
   const initial = readFiltersFromParams(new URLSearchParams(searchParams.toString()));
 
-  const [tagFilter, setTagFilter] = useState<string>(initial.tagFilter);
+  const [tagFilters, setTagFilters] = useState<string[]>(initial.tagFilters);
   const [searchQuery, setSearchQuery] = useState<string>(initial.searchQuery);
   const [filters, setFilters] = useState<AttributeFilter[]>(initial.filters);
   const [quickFilters, setQuickFilters] = useState<QuickFilters>(initial.quickFilters);
@@ -31,7 +31,7 @@ export function useFilterState(): FilterState & FilterActions {
 
   useEffect(() => {
     const current: FilterState = {
-      tagFilter,
+      tagFilters,
       searchQuery,
       filters,
       quickFilters,
@@ -53,7 +53,7 @@ export function useFilterState(): FilterState & FilterActions {
     router.replace(target, { scroll: false });
     lastPushedRef.current = current;
   }, [
-    tagFilter,
+    tagFilters,
     searchQuery,
     filters,
     quickFilters,
@@ -68,7 +68,7 @@ export function useFilterState(): FilterState & FilterActions {
   useEffect(() => {
     const fromUrl = readFiltersFromParams(new URLSearchParams(searchParams.toString()));
     const current: FilterState = {
-      tagFilter,
+      tagFilters,
       searchQuery,
       filters,
       quickFilters,
@@ -78,7 +78,7 @@ export function useFilterState(): FilterState & FilterActions {
     if (filterStatesEqual(fromUrl, current)) return;
 
     isApplyingFromUrlRef.current = true;
-    setTagFilter(fromUrl.tagFilter);
+    setTagFilters(fromUrl.tagFilters);
     setSearchQuery(fromUrl.searchQuery);
     setFilters(fromUrl.filters);
     setQuickFilters(fromUrl.quickFilters);
@@ -91,8 +91,20 @@ export function useFilterState(): FilterState & FilterActions {
     setFilters((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const addTagFilter = useCallback((tag: string) => {
+    setTagFilters((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
+  }, []);
+
+  const removeTagFilter = useCallback((tag: string) => {
+    setTagFilters((prev) => prev.filter((t) => t !== tag));
+  }, []);
+
+  const toggleTagFilter = useCallback((tag: string) => {
+    setTagFilters((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+  }, []);
+
   const clearAllFilters = useCallback(() => {
-    setTagFilter("");
+    setTagFilters([]);
     setSearchQuery("");
     setFilters([]);
     setQuickFilters({ voice: false, annotations: false, notes: false, favorites: false });
@@ -101,13 +113,16 @@ export function useFilterState(): FilterState & FilterActions {
   }, []);
 
   return {
-    tagFilter,
+    tagFilters,
     searchQuery,
     filters,
     quickFilters,
     dateRangeFilter,
     playbookFilter,
-    setTagFilter,
+    setTagFilters,
+    addTagFilter,
+    removeTagFilter,
+    toggleTagFilter,
     setSearchQuery,
     setFilters,
     setQuickFilters,

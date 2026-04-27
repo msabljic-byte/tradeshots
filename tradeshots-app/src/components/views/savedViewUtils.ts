@@ -2,7 +2,8 @@ import type { FilterState } from "@/components/filters/types";
 
 export type SavedViewFilters = {
   attributeFilters: Array<{ key: string; value: string }>;
-  tagFilter: string;
+  tagFilters?: string[];
+  tagFilter?: string;
   searchQuery: string;
   quickFilters: {
     voice: boolean;
@@ -30,7 +31,7 @@ export function savedViewToFilterState(view: SavedView): FilterState {
   if (Array.isArray(view.filters)) {
     return {
       filters: view.filters,
-      tagFilter: "",
+      tagFilters: [],
       searchQuery: "",
       quickFilters: { voice: false, annotations: false, notes: false, favorites: false },
       dateRangeFilter: { from: null, to: null },
@@ -38,9 +39,13 @@ export function savedViewToFilterState(view: SavedView): FilterState {
     };
   }
   const f = view.filters;
+  const rawTags = f.tagFilters ?? (typeof f.tagFilter === "string" ? [f.tagFilter] : []);
+  const tagFilters = Array.from(
+    new Set(rawTags.filter((t): t is string => typeof t === "string" && t.trim().length > 0))
+  );
   return {
     filters: f.attributeFilters ?? [],
-    tagFilter: f.tagFilter ?? "",
+    tagFilters,
     searchQuery: f.searchQuery ?? "",
     quickFilters: {
       voice: Boolean(f.quickFilters?.voice),
@@ -60,7 +65,7 @@ export function savedViewToFilterState(view: SavedView): FilterState {
 export function filterStateToSavedViewFilters(state: FilterState): SavedViewFilters {
   return {
     attributeFilters: state.filters,
-    tagFilter: state.tagFilter,
+    tagFilters: state.tagFilters,
     searchQuery: state.searchQuery,
     quickFilters: state.quickFilters,
     dateRangeFilter: state.dateRangeFilter,
@@ -74,7 +79,10 @@ export function filterStateToSavedViewFilters(state: FilterState): SavedViewFilt
  * state, the view is "clean"; otherwise it's "modified".
  */
 export function filtersEqual(a: FilterState, b: FilterState): boolean {
-  if (a.tagFilter !== b.tagFilter) return false;
+  if (a.tagFilters.length !== b.tagFilters.length) return false;
+  const tagsA = [...a.tagFilters].sort().join("|");
+  const tagsB = [...b.tagFilters].sort().join("|");
+  if (tagsA !== tagsB) return false;
   if (a.searchQuery !== b.searchQuery) return false;
   if (a.playbookFilter !== b.playbookFilter) return false;
   if (a.dateRangeFilter.from !== b.dateRangeFilter.from) return false;

@@ -20,8 +20,10 @@ export function writeFiltersToParams(target: URLSearchParams, state: FilterState
   if (state.searchQuery.trim()) {
     target.set("q", state.searchQuery.trim());
   }
-  if (state.tagFilter.trim()) {
-    target.set("tag", state.tagFilter.trim());
+  for (const tag of state.tagFilters) {
+    if (tag.trim()) {
+      target.append("tag", tag);
+    }
   }
   for (const f of state.filters) {
     target.append("attr", `${f.key}:${f.value}`);
@@ -47,7 +49,9 @@ export function writeFiltersToParams(target: URLSearchParams, state: FilterState
  */
 export function readFiltersFromParams(params: URLSearchParams): FilterState {
   const searchQuery = params.get("q") ?? "";
-  const tagFilter = params.get("tag") ?? "";
+  const tagFilters = Array.from(
+    new Set(params.getAll("tag").filter((t) => t.trim().length > 0))
+  );
 
   const attrParams = params.getAll("attr");
   const filters: AttributeFilter[] = [];
@@ -80,7 +84,7 @@ export function readFiltersFromParams(params: URLSearchParams): FilterState {
 
   return {
     searchQuery,
-    tagFilter,
+    tagFilters,
     filters,
     quickFilters,
     dateRangeFilter,
@@ -94,7 +98,10 @@ export function readFiltersFromParams(params: URLSearchParams): FilterState {
  */
 export function filterStatesEqual(a: FilterState, b: FilterState): boolean {
   if (a.searchQuery !== b.searchQuery) return false;
-  if (a.tagFilter !== b.tagFilter) return false;
+  if (a.tagFilters.length !== b.tagFilters.length) return false;
+  const tagsA = [...a.tagFilters].sort().join("|");
+  const tagsB = [...b.tagFilters].sort().join("|");
+  if (tagsA !== tagsB) return false;
   if (a.playbookFilter !== b.playbookFilter) return false;
   if (a.dateRangeFilter.from !== b.dateRangeFilter.from) return false;
   if (a.dateRangeFilter.to !== b.dateRangeFilter.to) return false;

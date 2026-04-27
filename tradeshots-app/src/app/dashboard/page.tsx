@@ -580,13 +580,15 @@ function DashboardPageContent() {
   const [screenshots, setScreenshots] = useState<ScreenshotRow[]>([]);
   const [allScreenshots, setAllScreenshots] = useState<any[]>([]);
   const {
-    tagFilter,
+    tagFilters,
     searchQuery,
     filters,
     quickFilters,
     dateRangeFilter,
     playbookFilter,
-    setTagFilter,
+    setTagFilters,
+    removeTagFilter,
+    toggleTagFilter,
     setSearchQuery,
     setFilters,
     setQuickFilters,
@@ -1019,13 +1021,15 @@ function DashboardPageContent() {
   );
 
   function applyDashboardScreenshotFilters(rows: ScreenshotRow[]): ScreenshotRow[] {
-    const tagFilterLower = tagFilter.trim().toLowerCase();
+    const tagFiltersLower = tagFilters.map((t) => t.trim().toLowerCase()).filter(Boolean);
     const searchLower = searchQuery.trim().toLowerCase();
     return rows.filter((s) => {
       const attributePairs = attributesByScreenshot[s.id] ?? [];
       const matchesTag =
-        !tagFilterLower ||
-        s.tags?.some((tag) => tag.toLowerCase().includes(tagFilterLower));
+        tagFiltersLower.length === 0 ||
+        tagFiltersLower.some((tagTerm) =>
+          s.tags?.some((tag) => tag.toLowerCase().includes(tagTerm))
+        );
       const matchesSearch =
         !searchLower ||
         String(s.notes ?? "").toLowerCase().includes(searchLower) ||
@@ -1808,7 +1812,7 @@ function DashboardPageContent() {
   function handleOpenSaveDialog() {
     const hasAnyFilter =
       filters.length > 0 ||
-      tagFilter.trim().length > 0 ||
+      tagFilters.length > 0 ||
       searchQuery.trim().length > 0 ||
       quickFilters.voice ||
       quickFilters.annotations ||
@@ -1835,7 +1839,7 @@ function DashboardPageContent() {
       name: trimmedName,
         filters: filterStateToSavedViewFilters({
           filters,
-          tagFilter,
+          tagFilters,
           searchQuery,
           quickFilters,
           dateRangeFilter,
@@ -1863,6 +1867,7 @@ function DashboardPageContent() {
 
     const payload = view.filters as {
       attributeFilters?: Array<{ key: string; value: string }>;
+      tagFilters?: string[];
       tagFilter?: string;
       searchQuery?: string;
       quickFilters?: {
@@ -1874,8 +1879,20 @@ function DashboardPageContent() {
       dateRangeFilter?: { from: string | null; to: string | null };
       playbookFilter?: string | null;
     };
+    const rawTags: unknown = payload.tagFilters ?? payload.tagFilter ?? [];
+    let tagsArray: string[] = [];
+    if (Array.isArray(rawTags)) {
+      tagsArray = Array.from(
+        new Set(
+          rawTags.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+        )
+      );
+    } else if (typeof rawTags === "string" && rawTags.trim().length > 0) {
+      // Legacy single-tag saved view - wrap in array.
+      tagsArray = [rawTags];
+    }
     setFilters(payload.attributeFilters ?? []);
-    setTagFilter(String(payload.tagFilter ?? ""));
+    setTagFilters(tagsArray);
     setSearchQuery(String(payload.searchQuery ?? ""));
     setQuickFilters({
       voice: Boolean(payload.quickFilters?.voice),
@@ -1894,7 +1911,7 @@ function DashboardPageContent() {
       .update({
         filters: filterStateToSavedViewFilters({
           filters,
-          tagFilter,
+          tagFilters,
           searchQuery,
           quickFilters,
           dateRangeFilter,
@@ -2226,7 +2243,7 @@ function DashboardPageContent() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [screenshots, tagFilter, filters, quickFilters, attributeKeyValuesByScreenshot]);
+  }, [screenshots, tagFilters, filters, quickFilters, attributeKeyValuesByScreenshot]);
 
   // useEffect: lock body scroll while screenshot detail modal is open.
   useEffect(() => {
@@ -2378,7 +2395,7 @@ function DashboardPageContent() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [
     screenshots,
-    tagFilter,
+    tagFilters,
     searchQuery,
     filters,
     quickFilters,
@@ -2437,7 +2454,7 @@ function DashboardPageContent() {
   }, [
     selectedIndex,
     screenshots,
-    tagFilter,
+    tagFilters,
     searchQuery,
     filters,
     quickFilters,
@@ -2512,7 +2529,7 @@ function DashboardPageContent() {
   }, [
     selectedIndex,
     screenshots,
-    tagFilter,
+    tagFilters,
     searchQuery,
     filters,
     quickFilters,
@@ -3219,7 +3236,7 @@ function DashboardPageContent() {
     [
       screenshots,
       searchQuery,
-      tagFilter,
+      tagFilters,
       filters,
       quickFilters,
       attributesByScreenshot,
@@ -3236,7 +3253,7 @@ function DashboardPageContent() {
     const stored = savedViewToFilterState(activeSavedView);
     const current = {
       filters,
-      tagFilter,
+      tagFilters,
       searchQuery,
       quickFilters,
       dateRangeFilter,
@@ -3246,7 +3263,7 @@ function DashboardPageContent() {
   }, [
     activeSavedView,
     filters,
-    tagFilter,
+    tagFilters,
     searchQuery,
     quickFilters,
     dateRangeFilter,
@@ -3261,7 +3278,7 @@ function DashboardPageContent() {
     const filteredCount = filteredScreenshots.length;
     const hasFilters =
       filters.length > 0 ||
-      tagFilter.trim().length > 0 ||
+      tagFilters.length > 0 ||
       searchQuery.trim().length > 0 ||
       quickFilters.voice ||
       quickFilters.annotations ||
@@ -3284,10 +3301,10 @@ function DashboardPageContent() {
     const lastSaved =
       latestTimestamp > 0 ? new Date(latestTimestamp).toISOString() : screenshots[0]?.created_at ?? null;
     return `${totalCount} SCREENSHOT${totalCount === 1 ? "" : "S"} · LAST SAVED ${formatRelative(lastSaved)}`;
-  }, [filteredScreenshots.length, filters, quickFilters, screenshots, searchQuery, tagFilter]);
+  }, [filteredScreenshots.length, filters, quickFilters, screenshots, searchQuery, tagFilters]);
   const hasActiveDashboardFilters =
     filters.length > 0 ||
-    tagFilter.trim().length > 0 ||
+    tagFilters.length > 0 ||
     searchQuery.trim().length > 0 ||
     quickFilters.voice ||
     quickFilters.annotations ||
@@ -3297,7 +3314,7 @@ function DashboardPageContent() {
     dateRangeFilter.to !== null ||
     playbookFilter !== null;
   const screenshotFilterSignature = JSON.stringify({
-    tagFilter,
+    tagFilters,
     searchQuery,
     filters,
     quickFilters,
@@ -3397,7 +3414,7 @@ function DashboardPageContent() {
     }
 
     // If hidden by active filters, clear filters then open within full list.
-    setTagFilter("");
+    setTagFilters([]);
     setFilters([]);
     window.setTimeout(() => {
       const allIndex = screenshots.findIndex((s) => s.id === screenshotId);
@@ -5690,7 +5707,7 @@ function DashboardPageContent() {
               <div className="mb-6 rounded-xl border border-default bg-elevated p-5">
                 <ActiveFiltersRow
                   chips={buildActiveFilterChips({
-                    tagFilter,
+                    tagFilters,
                     searchQuery,
                     filters,
                     quickFilters,
@@ -5702,7 +5719,7 @@ function DashboardPageContent() {
                     })),
                     onRemoveAttribute: removeFilter,
                     onClearSearch: () => setSearchQuery(""),
-                    onClearTag: () => setTagFilter(""),
+                    onRemoveTag: removeTagFilter,
                     onSetDateRange: setDateRangeFilter,
                     onSetPlaybook: setPlaybookFilter,
                     onToggleQuickFilter: handleToggleQuickFilter,
@@ -5731,11 +5748,11 @@ function DashboardPageContent() {
                         id: String(f.id),
                         name: String(f.name ?? ""),
                       }))}
-                      tagFilter={tagFilter}
+                      tagFilters={tagFilters}
                       filters={filters}
                       dateRangeFilter={dateRangeFilter}
                       playbookFilter={playbookFilter}
-                      onSetTagFilter={setTagFilter}
+                      onToggleTagFilter={toggleTagFilter}
                       onAddAttributeFilter={(pair) => addFilter(pair.key, pair.value)}
                       onRemoveAttributeFilter={removeFilter}
                       onSetDateRange={setDateRangeFilter}

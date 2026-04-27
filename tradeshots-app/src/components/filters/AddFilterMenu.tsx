@@ -14,11 +14,11 @@ type AddFilterMenuProps = {
   screenshots: ScreenshotRow[];
   attributesByScreenshot: Record<string, Array<{ key: string; value: string }>>;
   folders: FolderRow[];
-  tagFilter: string;
+  tagFilters: string[];
   filters: Array<{ key: string; value: string }>;
   dateRangeFilter: { from: string | null; to: string | null };
   playbookFilter: string | null;
-  onSetTagFilter: (value: string) => void;
+  onToggleTagFilter: (tag: string) => void;
   onAddAttributeFilter: (pair: { key: string; value: string }) => void;
   onRemoveAttributeFilter: (index: number) => void;
   onSetDateRange: (range: { from: string | null; to: string | null }) => void;
@@ -30,11 +30,11 @@ export function AddFilterMenu({
   screenshots,
   attributesByScreenshot,
   folders,
-  tagFilter,
+  tagFilters,
   filters,
   dateRangeFilter,
   playbookFilter,
-  onSetTagFilter,
+  onToggleTagFilter,
   onAddAttributeFilter,
   onRemoveAttributeFilter,
   onSetDateRange,
@@ -96,19 +96,25 @@ export function AddFilterMenu({
                 className="ui-input mb-2 h-8 w-full text-sm"
               />
               <div className="flex flex-wrap gap-1.5">
-                {visibleTags.slice(0, 12).map((tag) => (
-                  <button
-                    key={tag.name}
-                    onClick={() => onSetTagFilter(tagFilter === tag.name ? "" : tag.name)}
-                    className={`rounded-[var(--radius-sm)] border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
-                      tagFilter === tag.name
-                        ? "border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--accent)]"
-                        : "border-[var(--border-strong)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    {tag.name} <span className="opacity-60">({tag.count})</span>
-                  </button>
-                ))}
+                {visibleTags.slice(0, 12).map((tag) => {
+                  const isActive = tagFilters.includes(tag.name);
+                  return (
+                    <button
+                      key={tag.name}
+                      onClick={() => onToggleTagFilter(tag.name)}
+                      className={`rounded-[var(--radius-sm)] border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
+                        isActive
+                          ? "border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--accent)]"
+                          : "border-[var(--border-strong)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                      }`}
+                    >
+                      {tag.name} <span className="opacity-60">({tag.count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.15em] text-[var(--text-muted)] italic">
+                Click tags to toggle. Multiple allowed.
               </div>
             </>
           )}

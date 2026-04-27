@@ -4,7 +4,7 @@ type ChipBuildArgs = FilterState & {
   folders: Array<{ id: string; name: string }>;
   onRemoveAttribute: (index: number) => void;
   onClearSearch: () => void;
-  onClearTag: () => void;
+  onRemoveTag: (tag: string) => void;
   onSetDateRange: (range: { from: string | null; to: string | null }) => void;
   onSetPlaybook: (folderId: string | null) => void;
   onToggleQuickFilter: (key: keyof QuickFilters) => void;
@@ -21,11 +21,12 @@ export function buildActiveFilterChips(args: ChipBuildArgs) {
     });
   }
 
-  if (args.tagFilter.trim().length > 0) {
+  for (const tag of args.tagFilters) {
+    if (!tag.trim()) continue;
     chips.push({
-      id: "tag",
-      label: `Tag: ${args.tagFilter.trim()}`,
-      onRemove: args.onClearTag,
+      id: `tag-${tag}`,
+      label: `Tag: ${tag}`,
+      onRemove: () => args.onRemoveTag(tag),
     });
   }
   if (args.dateRangeFilter.from || args.dateRangeFilter.to) {
