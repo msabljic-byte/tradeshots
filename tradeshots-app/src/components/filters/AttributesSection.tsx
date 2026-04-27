@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronLeft } from "lucide-react";
 import type { AttributeFilter } from "./types";
+import { useRecentAttributes } from "./useRecentAttributes";
 
 type AttributesSectionProps = {
   attributesByScreenshot: Record<string, Array<{ key: string; value: string }>>;
@@ -16,6 +17,7 @@ export function AttributesSection({
   onRemoveAttributeFilter,
 }: AttributesSectionProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const { recent, recordKey } = useRecentAttributes();
 
   const keysWithValueCount = useMemo(() => {
     const keyToValues = new Map<string, Set<string>>();
@@ -44,6 +46,11 @@ export function AttributesSection({
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => b.count - a.count);
   }, [attributesByScreenshot, selectedKey]);
+
+  const recentValid = useMemo(
+    () => recent.filter((k) => keysWithValueCount.some((kv) => kv.key === k)),
+    [recent, keysWithValueCount]
+  );
 
   const isSelected = (key: string, value: string) =>
     filters.some((f) => f.key === key && f.value === value);
@@ -82,35 +89,71 @@ export function AttributesSection({
         {keysWithValueCount.length === 0 ? (
           <div className="font-serif text-sm italic text-[var(--text-muted)]">No attributes yet.</div>
         ) : (
-          <div className="space-y-1">
-            {keysWithValueCount.map(({ key, valueCount }) => {
-              const activeCount = filters.filter((f) => f.key === key).length;
-              return (
-                <button
-                  key={key}
-                  onClick={() => setSelectedKey(key)}
-                  className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--bg-shadow)]"
-                >
-                  <span className="flex items-center justify-between">
-                    <span className="font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-primary)]">
-                      {key}
-                      {activeCount > 0 && (
-                        <span
-                          className="ml-2 inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-[2px] bg-[var(--accent-tint)] px-1 text-[9px] font-medium text-[var(--accent)]"
-                          aria-label={`${activeCount} filter${activeCount > 1 ? "s" : ""} active for ${key}`}
-                        >
-                          {activeCount}
-                        </span>
-                      )}
+          <>
+            {recentValid.length > 0 && (
+              <>
+                <div className="mb-2 mt-1 font-mono text-[9px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                  Recent
+                </div>
+                <div className="mb-4 flex flex-wrap gap-1.5 border-b border-[var(--border-subtle)] pb-4">
+                  {recentValid.map((key) => {
+                    const meta = keysWithValueCount.find((k) => k.key === key);
+                    if (!meta) return null;
+                    const activeCount = filters.filter((f) => f.key === key).length;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          setSelectedKey(key);
+                          recordKey(key);
+                        }}
+                        className="rounded-[var(--radius-sm)] border border-[var(--border-strong)] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-shadow)]"
+                      >
+                        {key}
+                        {activeCount > 0 && (
+                          <span className="ml-1.5 inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-[2px] bg-[var(--accent-tint)] px-1 text-[9px] font-medium text-[var(--accent)]">
+                            {activeCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            <div className="space-y-1">
+              {keysWithValueCount.map(({ key, valueCount }) => {
+                const activeCount = filters.filter((f) => f.key === key).length;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setSelectedKey(key);
+                      recordKey(key);
+                    }}
+                    className="w-full rounded-[var(--radius-md)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--bg-shadow)]"
+                  >
+                    <span className="flex items-center justify-between">
+                      <span className="font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-primary)]">
+                        {key}
+                        {activeCount > 0 && (
+                          <span
+                            className="ml-2 inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-[2px] bg-[var(--accent-tint)] px-1 text-[9px] font-medium text-[var(--accent)]"
+                            aria-label={`${activeCount} filter${activeCount > 1 ? "s" : ""} active for ${key}`}
+                          >
+                            {activeCount}
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono text-[10px] text-[var(--text-muted)]">
+                        {valueCount} {valueCount === 1 ? "value" : "values"} ▸
+                      </span>
                     </span>
-                    <span className="font-mono text-[10px] text-[var(--text-muted)]">
-                      {valueCount} {valueCount === 1 ? "value" : "values"} ▸
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     );
